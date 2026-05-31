@@ -259,14 +259,20 @@ async function cycleTask(projectId, taskId, current) {
   const nextStatus = next[current];
   const res = await api(`/api/projects/${projectId}/tasks/${taskId}`, {method:'PATCH', body:{status:nextStatus}});
 
-  if (nextStatus === 'completed' && liff.isInClient()) {
-    try {
-      await liff.sendMessages([{
-        type: 'text',
-        text: `✅ 完成任務：${res.title}`
-      }]);
-    } catch(e) {
-      console.log('sendMessages failed:', e);
+  if (nextStatus === 'completed') {
+    if (liff.isInClient()) {
+      try {
+        await liff.sendMessages([{
+          type: 'text',
+          text: `✅ 完成任務：${res.title}`
+        }]);
+        toast('已傳送完成通知到 LINE');
+      } catch(e) {
+        toast('需要 chat_message.write 權限');
+        console.log('sendMessages failed:', e);
+      }
+    } else {
+      toast(`✅ 完成：${res.title}`);
     }
   }
 
