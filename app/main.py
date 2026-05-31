@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 import os
@@ -32,6 +34,14 @@ app.add_middleware(
 
 app.include_router(projects.router, prefix="/api")
 app.include_router(claude_routes.router, prefix="/api")
+
+STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/api-explorer", include_in_schema=False)
+def api_explorer():
+    return FileResponse(os.path.join(STATIC_DIR, "api-explorer.html"))
 
 
 def check_rate_limit_reset():

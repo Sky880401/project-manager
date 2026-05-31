@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API Explorer</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --border: #e1e4e8;
+    --text: #24292e;
+    --muted: #6a737d;
+    --get: #0366d6;
+    --get-bg: #e8f0fe;
+    --post: #28a745;
+    --post-bg: #e6f4ea;
+    --patch: #e36209;
+    --patch-bg: #fff3e0;
+    --delete: #d73a49;
+    --delete-bg: #fdecea;
+    --radius: 4px;
+    --mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  }
+
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+  /* Header */
+  .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 100; }
+  .header h1 { font-size: 16px; font-weight: 600; flex: 0 0 auto; }
+  .header .version { font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 2px 8px; color: var(--muted); }
+  .search-wrap { flex: 1; max-width: 400px; }
+  .search-wrap input { width: 100%; padding: 7px 12px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 13px; outline: none; background: var(--bg); }
+  .search-wrap input:focus { border-color: var(--get); background: var(--surface); }
+
+  /* Stats */
+  .stats { display: flex; gap: 12px; padding: 16px 24px; flex-wrap: wrap; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 20px; min-width: 100px; }
+  .stat-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-card .value { font-size: 24px; font-weight: 700; margin-top: 2px; }
+  .stat-card.get .value { color: var(--get); }
+  .stat-card.post .value { color: var(--post); }
+  .stat-card.patch .value { color: var(--patch); }
+  .stat-card.delete .value { color: var(--delete); }
+
+  /* Content */
+  .content { padding: 0 24px 40px; }
+
+  /* Tag group */
+  .tag-group { margin-bottom: 12px; }
+  .tag-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; user-select: none; }
+  .tag-header:hover { background: var(--bg); }
+  .tag-header .tag-name { font-weight: 600; font-size: 13px; flex: 1; }
+  .tag-header .count { font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 1px 8px; color: var(--muted); }
+  .tag-header .chevron { color: var(--muted); font-size: 10px; transition: transform 0.15s; }
+  .tag-header.open .chevron { transform: rotate(90deg); }
+  .tag-body { border: 1px solid var(--border); border-top: none; border-radius: 0 0 var(--radius) var(--radius); overflow: hidden; display: none; }
+  .tag-body.open { display: block; }
+
+  /* Endpoint row */
+  .endpoint { border-bottom: 1px solid var(--border); }
+  .endpoint:last-child { border-bottom: none; }
+  .endpoint-header { display: flex; align-items: center; gap: 12px; padding: 10px 14px; cursor: pointer; background: var(--surface); }
+  .endpoint-header:hover { background: var(--bg); }
+  .method { font-family: var(--mono); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: var(--radius); min-width: 58px; text-align: center; }
+  .method.GET    { color: var(--get);    background: var(--get-bg); }
+  .method.POST   { color: var(--post);   background: var(--post-bg); }
+  .method.PATCH  { color: var(--patch);  background: var(--patch-bg); }
+  .method.DELETE { color: var(--delete); background: var(--delete-bg); }
+  .path { font-family: var(--mono); font-size: 13px; flex: 1; }
+  .summary { font-size: 12px; color: var(--muted); }
+
+  /* Endpoint detail */
+  .endpoint-detail { display: none; padding: 16px 20px; background: #fafbfc; border-top: 1px solid var(--border); }
+  .endpoint-detail.open { display: block; }
+  .detail-section { margin-bottom: 14px; }
+  .detail-section:last-child { margin-bottom: 0; }
+  .detail-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 8px; }
+  .param-row { display: flex; align-items: baseline; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+  .param-row:last-child { border-bottom: none; }
+  .param-name { font-family: var(--mono); font-size: 12px; font-weight: 600; min-width: 140px; }
+  .param-in { font-size: 11px; color: var(--muted); background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 1px 7px; }
+  .param-type { font-family: var(--mono); font-size: 11px; color: var(--patch); }
+  .param-required { font-size: 10px; color: var(--delete); }
+  .param-desc { font-size: 12px; color: var(--muted); flex: 1; }
+  .schema-block { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; color: var(--text); }
+  .response-row { display: flex; gap: 12px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--border); }
+  .response-row:last-child { border-bottom: none; }
+  .status-code { font-family: var(--mono); font-size: 12px; font-weight: 700; min-width: 44px; }
+  .status-code.s2 { color: var(--post); }
+  .status-code.s4 { color: var(--delete); }
+  .status-code.s5 { color: var(--patch); }
+  .response-desc { font-size: 12px; color: var(--muted); }
+
+  /* Empty / loading */
+  .loading { text-align: center; padding: 60px; color: var(--muted); }
+  .no-results { text-align: center; padding: 40px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>API Explorer</h1>
+  <span class="version" id="version">v—</span>
+  <div class="search-wrap">
+    <input id="search" type="text" placeholder="搜尋路徑或描述…" oninput="filterEndpoints()">
+  </div>
+</div>
+
+<div class="stats" id="stats"></div>
+<div class="content" id="content"><div class="loading">載入中…</div></div>
+
+<script>
+let allData = null;
+
+const METHOD_ORDER = ['GET','POST','PATCH','PUT','DELETE'];
+
+async function load() {
+  try {
+    const res = await fetch('/openapi.json');
+    allData = await res.json();
+    render(allData);
+  } catch(e) {
+    document.getElementById('content').innerHTML = '<div class="loading">無法載入 openapi.json</div>';
+  }
+}
+
+function collectEndpoints(spec) {
+  const endpoints = [];
+  for (const [path, methods] of Object.entries(spec.paths || {})) {
+    for (const [method, op] of Object.entries(methods)) {
+      if (!['get','post','put','patch','delete'].includes(method)) continue;
+      endpoints.push({ path, method: method.toUpperCase(), op });
+    }
+  }
+  return endpoints;
+}
+
+function groupByTag(endpoints) {
+  const groups = {};
+  for (const ep of endpoints) {
+    const tags = ep.op.tags || ['other'];
+    for (const tag of tags) {
+      if (!groups[tag]) groups[tag] = [];
+      groups[tag].push(ep);
+    }
+  }
+  return groups;
+}
+
+function renderStats(endpoints) {
+  const counts = { GET:0, POST:0, PATCH:0, DELETE:0 };
+  for (const ep of endpoints) counts[ep.method] = (counts[ep.method]||0) + 1;
+  document.getElementById('version').textContent = 'v' + (allData.info?.version || '?');
+  document.getElementById('stats').innerHTML = `
+    <div class="stat-card"><div class="label">總端點</div><div class="value">${endpoints.length}</div></div>
+    <div class="stat-card get"><div class="label">GET</div><div class="value">${counts.GET}</div></div>
+    <div class="stat-card post"><div class="label">POST</div><div class="value">${counts.POST}</div></div>
+    <div class="stat-card patch"><div class="label">PATCH</div><div class="value">${counts.PATCH}</div></div>
+    <div class="stat-card delete"><div class="label">DELETE</div><div class="value">${counts.DELETE}</div></div>
+  `;
+}
+
+function resolveSchema(schema, spec, depth=0) {
+  if (!schema || depth > 4) return {};
+  if (schema.$ref) {
+    const name = schema.$ref.split('/').pop();
+    return resolveSchema(spec.components?.schemas?.[name], spec, depth+1);
+  }
+  if (schema.allOf) return resolveSchema(schema.allOf[0], spec, depth+1);
+  return schema;
+}
+
+function schemaToStr(schema, spec, indent=0) {
+  schema = resolveSchema(schema, spec);
+  if (!schema || !schema.properties) return JSON.stringify(schema?.example ?? schema?.type ?? '{}', null, 2);
+  const pad = '  '.repeat(indent);
+  const lines = ['{'];
+  for (const [k, v] of Object.entries(schema.properties)) {
+    const resolved = resolveSchema(v, spec);
+    const type = resolved.type || (resolved.properties ? 'object' : '?');
+    const req = (schema.required || []).includes(k) ? ' *' : '';
+    lines.push(`${pad}  "${k}": ${type}${req}  // ${resolved.description || ''}`);
+  }
+  lines.push(pad + '}');
+  return lines.join('\n');
+}
+
+function renderEndpoint(ep, spec) {
+  const op = ep.op;
+  const params = (op.parameters || []);
+  const body = op.requestBody?.content?.['application/json']?.schema;
+  const responses = op.responses || {};
+
+  const paramsHtml = params.length ? `
+    <div class="detail-section">
+      <div class="detail-title">Parameters</div>
+      ${params.map(p => `
+        <div class="param-row">
+          <span class="param-name">${p.name}</span>
+          <span class="param-in">${p.in}</span>
+          <span class="param-type">${p.schema?.type || ''}</span>
+          ${p.required ? '<span class="param-required">required</span>' : ''}
+          <span class="param-desc">${p.description || ''}</span>
+        </div>`).join('')}
+    </div>` : '';
+
+  const bodyHtml = body ? `
+    <div class="detail-section">
+      <div class="detail-title">Request Body</div>
+      <div class="schema-block">${escHtml(schemaToStr(body, spec))}</div>
+    </div>` : '';
+
+  const responsesHtml = `
+    <div class="detail-section">
+      <div class="detail-title">Responses</div>
+      ${Object.entries(responses).map(([code, r]) => `
+        <div class="response-row">
+          <span class="status-code s${code[0]}">${code}</span>
+          <span class="response-desc">${r.description || ''}</span>
+        </div>`).join('')}
+    </div>`;
+
+  return `
+    <div class="endpoint" data-path="${ep.path}" data-method="${ep.method}" data-summary="${(op.summary||'').toLowerCase()}">
+      <div class="endpoint-header" onclick="toggleDetail(this)">
+        <span class="method ${ep.method}">${ep.method}</span>
+        <span class="path">${ep.path}</span>
+        <span class="summary">${op.summary || ''}</span>
+      </div>
+      <div class="endpoint-detail">
+        ${op.description ? `<div class="detail-section"><div class="detail-title">Description</div><div>${op.description}</div></div>` : ''}
+        ${paramsHtml}${bodyHtml}${responsesHtml}
+      </div>
+    </div>`;
+}
+
+function escHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function render(spec) {
+  const endpoints = collectEndpoints(spec);
+  renderStats(endpoints);
+  const groups = groupByTag(endpoints);
+  const content = document.getElementById('content');
+  if (!endpoints.length) { content.innerHTML = '<div class="no-results">沒有端點</div>'; return; }
+
+  content.innerHTML = Object.entries(groups).map(([tag, eps]) => `
+    <div class="tag-group" data-tag="${tag}">
+      <div class="tag-header open" onclick="toggleTag(this)">
+        <span class="tag-name">${tag}</span>
+        <span class="count">${eps.length}</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="tag-body open">
+        ${eps.sort((a,b) => METHOD_ORDER.indexOf(a.method) - METHOD_ORDER.indexOf(b.method))
+             .map(ep => renderEndpoint(ep, spec)).join('')}
+      </div>
+    </div>`).join('');
+}
+
+function toggleTag(header) {
+  header.classList.toggle('open');
+  header.nextElementSibling.classList.toggle('open');
+}
+
+function toggleDetail(header) {
+  const detail = header.nextElementSibling;
+  detail.classList.toggle('open');
+}
+
+function filterEndpoints() {
+  const q = document.getElementById('search').value.toLowerCase().trim();
+  let anyVisible = false;
+  document.querySelectorAll('.tag-group').forEach(group => {
+    let groupVisible = false;
+    group.querySelectorAll('.endpoint').forEach(ep => {
+      const match = !q || ep.dataset.path.includes(q) || ep.dataset.summary.includes(q) || ep.dataset.method.toLowerCase().includes(q);
+      ep.style.display = match ? '' : 'none';
+      if (match) groupVisible = true;
+    });
+    group.style.display = groupVisible ? '' : 'none';
+    if (groupVisible) anyVisible = true;
+  });
+  if (!anyVisible && q) {
+    document.getElementById('content').insertAdjacentHTML('beforeend', '<div class="no-results" id="no-res">找不到符合的端點</div>');
+  } else {
+    document.getElementById('no-res')?.remove();
+  }
+}
+
+load();
+</script>
+</body>
+</html>
