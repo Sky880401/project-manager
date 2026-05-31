@@ -65,8 +65,10 @@ def on_follow(event):
 def on_message(event):
     text = event.message.text.strip()
 
-    # 忽略 LIFF 自動發出的通知訊息
+    # LIFF 完成任務的自動通知 → 給予鼓勵回覆
     if text.startswith("✅ 完成任務："):
+        task_name = text.replace("✅ 完成任務：", "").strip()
+        reply(event.reply_token, TextMessage(text=f"👏 完成了「{task_name}」！繼續加油！"))
         return
 
     db = SessionLocal()
