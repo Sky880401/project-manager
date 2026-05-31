@@ -64,6 +64,11 @@ def on_follow(event):
 @handler.add(MessageEvent, message=TextMessageContent)
 def on_message(event):
     text = event.message.text.strip()
+
+    # 忽略 LIFF 自動發出的通知訊息
+    if text.startswith("✅ 完成任務："):
+        return
+
     db = SessionLocal()
     try:
         if text in ["專案", "p", "projects"]:
