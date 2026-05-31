@@ -106,26 +106,34 @@ def on_message(event):
             create_project(db, name, event.reply_token)
         elif text.startswith("完成 "):
             mark_done(db, text.split(" ", 1)[1].strip(), event.reply_token)
-        else:
-            # 其他所有訊息 → 交給 Claude AI 處理
+        elif text.startswith(("AI ", "ai ", "問 ", "A:", "a:")):
+            # 明確前綴才觸發 Claude AI
             if not user_id:
                 reply(event.reply_token, TextMessage(text="無法取得你的 LINE ID"))
                 return
+
+            # 移除前綴，取得實際問題
+            for prefix in ("AI ", "ai ", "問 ", "A:", "a:"):
+                if text.startswith(prefix):
+                    question = text[len(prefix):].strip()
+                    break
 
             history = db.query(Conversation).filter(
                 Conversation.line_user_id == user_id
             ).order_by(Conversation.created_at.asc()).limit(20).all()
 
             messages = [{"role": h.role, "content": h.content} for h in history]
-            messages.append({"role": "user", "content": text})
+            messages.append({"role": "user", "content": question})
 
             ai_reply = chat_with_claude(messages, db)
 
-            db.add(Conversation(line_user_id=user_id, role="user", content=text))
+            db.add(Conversation(line_user_id=user_id, role="user", content=question))
             db.add(Conversation(line_user_id=user_id, role="assistant", content=ai_reply))
             db.commit()
 
             reply(event.reply_token, TextMessage(text=ai_reply))
+        else:
+            reply(event.reply_token, TextMessage(text="不認識這個指令 🤔\n輸入「說明」查看所有指令"))
     finally:
         db.close()
 
@@ -180,8 +188,9 @@ def help_text():
         "用量 — 查看 API 用量與費用\n"
         "清除對話 — 清除 AI 對話記錄\n"
         "說明 — 顯示此說明\n\n"
-        "💬 直接輸入任何文字就能和 Claude 對話！\n"
-        "例：「幫我列出所有未完成的任務」"
+        "💬 AI 對話（加前綴才觸發）：\n"
+        "  AI 幫我列出未完成的任務\n"
+        "  問 現在 Claude 可以用嗎？"
     )
 
 def dashboard_message():
