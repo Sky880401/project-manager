@@ -43,6 +43,10 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 def api_explorer():
     return FileResponse(os.path.join(STATIC_DIR, "api-explorer.html"))
 
+@app.get("/dashboard", include_in_schema=False)
+def dashboard():
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
 
 def check_rate_limit_reset():
     """每分鐘檢查 rate limit 是否已過期，自動 resolve"""
