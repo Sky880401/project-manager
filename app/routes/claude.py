@@ -35,6 +35,7 @@ class CodeUsageIn(BaseModel):
     today_input: int = 0
     today_output: int = 0
     today_messages: int = 0
+    window_earliest: datetime | None = None
 
 
 @router.post("/code-usage")

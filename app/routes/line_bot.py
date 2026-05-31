@@ -301,13 +301,71 @@ def projects_flex(db: Session):
     )
 
 
+# Claude Code 5小時視窗估計上限（output tokens）— 可依實際撞限校準
+CODE_WINDOW_OUTPUT_BUDGET = int(os.getenv("CODE_WINDOW_OUTPUT_BUDGET", "500000"))
+
+
+def _progress_bar(pct):
+    filled = int(pct / 10)
+    return "█" * filled + "░" * (10 - filled)
+
+
 def claude_status_text(db: Session):
+    from datetime import datetime, timezone, timedelta
+    from app.models.claude_usage import CodeUsageReport
+
     s = get_claude_status(db)
+
+    lines = []
+
+    # --- Claude Code 訂閱額度 ---
+    r = db.query(CodeUsageReport).order_by(CodeUsageReport.reported_at.desc()).first()
+    if r:
+        used = r.window_5h_output
+        pct = min(100, int(used / CODE_WINDOW_OUTPUT_BUDGET * 100)) if CODE_WINDOW_OUTPUT_BUDGET else 0
+
+        # 視窗重置時間 = 視窗內最早訊息 + 5 小時
+        reset_str = "未知"
+        if r.window_earliest:
+            earliest = r.window_earliest
+            earliest = earliest.replace(tzinfo=timezone.utc) if earliest.tzinfo is None else earliest
+            reset_at = earliest + timedelta(hours=5)
+            now = datetime.now(timezone.utc)
+            remain = (reset_at - now).total_seconds()
+            if remain > 0:
+                h = int(remain // 3600)
+                m = int((remain % 3600) // 60)
+                reset_str = f"約 {h} 小時 {m} 分後（額度逐步釋放）"
+            else:
+                reset_str = "額度已釋放"
+
+        if pct >= 90:
+            icon = "🔴"
+        elif pct >= 70:
+            icon = "🟠"
+        else:
+            icon = "🟢"
+
+        lines.append("🖥 Claude Code 額度")
+        lines.append(f"{icon} 已使用 {pct}%")
+        lines.append(f"{_progress_bar(pct)}")
+        lines.append(f"⏱ 最舊用量 {reset_str}")
+        lines.append(f"💬 5 小時內 {r.window_5h_messages} 則訊息")
+        lines.append("")
+    else:
+        lines.append("🖥 Claude Code 額度：尚無資料")
+        lines.append("")
+
+    # --- API 對話狀態 ---
     if s["is_rate_limited"]:
         mins = s.get("minutes_until_reset", "?")
-        return TextMessage(text=f"🔴 Claude 目前被限速\n⏱ 約 {mins} 分鐘後恢復\n\n今日 sessions：{s['today_sessions']}\n待續接任務：{s['queue_count']} 個")
+        lines.append(f"🤖 API 對話：🔴 被限速")
+        lines.append(f"⏱ 約 {mins} 分鐘後恢復")
     else:
-        return TextMessage(text=f"🟢 Claude 可正常使用\n\n今日 sessions：{s['today_sessions']}\n今日 tokens：{s['today_tokens']:,}\n待續接任務：{s['queue_count']} 個")
+        lines.append(f"🤖 API 對話：🟢 可用")
+    lines.append(f"📋 待續接任務：{s['queue_count']} 個")
+
+    return TextMessage(text="\n".join(lines))
 
 
 def todo_text(db: Session):

@@ -17,6 +17,7 @@ today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
 w = {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "messages": 0}
 t = {"input": 0, "output": 0, "messages": 0}
+earliest_in_window = None  # 視窗內最早一筆訊息時間（用來算重置）
 
 
 def parse_ts(d):
@@ -58,6 +59,8 @@ for path in glob.glob(os.path.join(PROJECTS_DIR, "**", "*.jsonl"), recursive=Tru
                     w["cache_read"] += cr
                     w["cache_write"] += cw
                     w["messages"] += 1
+                    if earliest_in_window is None or ts < earliest_in_window:
+                        earliest_in_window = ts
                 if ts >= today_start:
                     t["input"] += inp
                     t["output"] += out
@@ -74,6 +77,7 @@ payload = {
     "today_input": t["input"],
     "today_output": t["output"],
     "today_messages": t["messages"],
+    "window_earliest": earliest_in_window.isoformat() if earliest_in_window else None,
 }
 
 try:

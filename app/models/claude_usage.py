@@ -45,6 +45,7 @@ class CodeUsageReport(Base):
     today_input = Column(Integer, default=0)
     today_output = Column(Integer, default=0)
     today_messages = Column(Integer, default=0)
+    window_earliest = Column(DateTime(timezone=True), nullable=True)
     reported_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
