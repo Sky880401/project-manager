@@ -146,6 +146,7 @@ const API = '';
 const LIFF_ID = '2010243777-kq9FJSJT';
 let currentTab = 'projects';
 let lineProfile = null;
+let currentProjectName = '';
 
 async function init() {
   try {
@@ -219,6 +220,7 @@ async function loadProjects() {
 
 async function showProjectDetail(id, name) {
   const p = await api(`/api/projects/${id}`);
+  currentProjectName = p.name;
   const milestones = p.milestones || [];
   const tasks = p.tasks || [];
   showSheet(`
@@ -264,7 +266,7 @@ async function cycleTask(projectId, taskId, current) {
       try {
         await liff.sendMessages([{
           type: 'text',
-          text: `✅ 完成任務：${res.title}`
+          text: `✅ 完成任務：[${currentProjectName}] ${res.title}`
         }]);
         toast('已傳送完成通知到 LINE');
       } catch(e) {
