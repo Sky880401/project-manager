@@ -22,7 +22,7 @@ from app.models.project import Project, Task, Milestone
 from app.models.claude_usage import LineUser
 from app.models.conversation import Conversation
 from app.services.claude_monitor import get_claude_status
-from app.services.claude_ai import chat_with_claude
+from app.services.claude_ai import chat_with_claude, get_usage_summary
 
 load_dotenv()
 
@@ -93,6 +93,8 @@ def on_message(event):
             reply(event.reply_token, todo_text(db))
         elif text in ["儀表板", "dashboard", "liff"]:
             reply(event.reply_token, dashboard_message())
+        elif text in ["用量", "usage", "費用"]:
+            reply(event.reply_token, usage_text(db))
         elif text in ["清除對話", "clear", "重置"]:
             db.query(Conversation).filter(Conversation.line_user_id == user_id).delete()
             db.commit()
@@ -145,6 +147,27 @@ def welcome_text():
     return TextMessage(text="👋 哈囉！我是你的專案管理助手\n\n輸入「說明」查看所有指令")
 
 
+def usage_text(db):
+    u = get_usage_summary(db)
+    t = u["today"]
+    m = u["month"]
+
+    def fmt(data):
+        return (f"  輸入：{data['input_tokens']:,} tokens\n"
+                f"  輸出：{data['output_tokens']:,} tokens\n"
+                f"  費用：${data['cost_usd']:.4f} USD\n"
+                f"  次數：{data['calls']} 次對話")
+
+    return TextMessage(text=(
+        "📊 Claude API 用量\n\n"
+        f"今日：\n{fmt(t)}\n\n"
+        f"本月：\n{fmt(m)}\n\n"
+        "定價（Sonnet 4.6）：\n"
+        "  輸入 $3 / 百萬 tokens\n"
+        "  輸出 $15 / 百萬 tokens"
+    ))
+
+
 def help_text():
     return (
         "📋 快捷指令：\n\n"
@@ -154,6 +177,7 @@ def help_text():
         "儀表板 — 開啟視覺化介面\n"
         "新增專案 名稱 — 建立新專案\n"
         "完成 任務名稱 — 標記任務完成\n"
+        "用量 — 查看 API 用量與費用\n"
         "清除對話 — 清除 AI 對話記錄\n"
         "說明 — 顯示此說明\n\n"
         "💬 直接輸入任何文字就能和 Claude 對話！\n"

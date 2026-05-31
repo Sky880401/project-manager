@@ -4,7 +4,39 @@ import json
 from sqlalchemy.orm import Session
 from app.models.project import Project, Task, Milestone
 from app.models.claude_usage import RateLimitEvent, ResumeQueue
+from app.models.conversation import ApiUsage
 from app.services.claude_monitor import get_claude_status
+
+# claude-sonnet-4-6 定價（USD per million tokens）
+PRICE_INPUT_PER_M = 3.0
+PRICE_OUTPUT_PER_M = 15.0
+
+
+def calc_cost(input_tokens: int, output_tokens: int) -> float:
+    return (input_tokens / 1_000_000 * PRICE_INPUT_PER_M +
+            output_tokens / 1_000_000 * PRICE_OUTPUT_PER_M)
+
+
+def get_usage_summary(db: Session) -> dict:
+    from datetime import datetime, timezone
+    from sqlalchemy import func as sqlfunc
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    def query_period(start):
+        rows = db.query(ApiUsage).filter(ApiUsage.created_at >= start).all()
+        return {
+            "input_tokens": sum(r.input_tokens for r in rows),
+            "output_tokens": sum(r.output_tokens for r in rows),
+            "cost_usd": sum(r.cost_usd for r in rows),
+            "calls": len(rows),
+        }
+
+    return {
+        "today": query_period(today_start),
+        "month": query_period(month_start),
+    }
 
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
@@ -187,16 +219,21 @@ def execute_tool(tool_name: str, tool_input: dict, db: Session) -> str:
 
 
 def chat_with_claude(messages: list, db: Session) -> str:
-    """與 Claude 對話，支援工具呼叫"""
+    """與 Claude 對話，支援工具呼叫，並記錄 token 用量"""
+    total_input = 0
+    total_output = 0
+    MODEL = "claude-sonnet-4-6"
+
     response = client.messages.create(
-        model="claude-sonnet-4-6",
+        model=MODEL,
         max_tokens=1024,
         system=SYSTEM_PROMPT,
         tools=TOOLS,
         messages=messages,
     )
+    total_input += response.usage.input_tokens
+    total_output += response.usage.output_tokens
 
-    # 處理工具呼叫
     while response.stop_reason == "tool_use":
         tool_results = []
         for block in response.content:
@@ -213,14 +250,20 @@ def chat_with_claude(messages: list, db: Session) -> str:
             {"role": "user", "content": tool_results}
         ]
         response = client.messages.create(
-            model="claude-sonnet-4-6",
+            model=MODEL,
             max_tokens=1024,
             system=SYSTEM_PROMPT,
             tools=TOOLS,
             messages=messages,
         )
+        total_input += response.usage.input_tokens
+        total_output += response.usage.output_tokens
 
-    # 取出文字回覆
+    # 記錄用量
+    cost = calc_cost(total_input, total_output)
+    db.add(ApiUsage(model=MODEL, input_tokens=total_input, output_tokens=total_output, cost_usd=cost))
+    db.commit()
+
     for block in response.content:
         if hasattr(block, "text"):
             return block.text
