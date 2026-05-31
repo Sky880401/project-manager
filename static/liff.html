@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Project Manager</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --line: #06C755;
+  --line-dark: #05a847;
+  --bg: #f4f5f7;
+  --surface: #fff;
+  --border: #e1e4e8;
+  --text: #24292e;
+  --muted: #6a737d;
+  --red: #d73a49;
+  --orange: #e36209;
+  --blue: #0366d6;
+  --radius: 12px;
+}
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding-bottom: 80px; }
+
+/* Header */
+.header { background: var(--line); color: #fff; padding: 16px 16px 12px; position: sticky; top: 0; z-index: 100; }
+.header-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.header h1 { font-size: 18px; font-weight: 700; }
+.avatar { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.6); object-fit: cover; background: rgba(255,255,255,0.3); }
+
+/* Tabs */
+.tabs { display: flex; gap: 4px; }
+.tab { flex: 1; padding: 8px 0; text-align: center; font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.7); border-radius: 8px; cursor: pointer; transition: all 0.15s; }
+.tab.active { background: rgba(255,255,255,0.2); color: #fff; }
+
+/* Content */
+.page { display: none; padding: 16px; }
+.page.active { display: block; }
+
+/* Cards */
+.project-card { background: var(--surface); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+.project-name { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+.project-desc { font-size: 12px; color: var(--muted); margin-bottom: 10px; min-height: 16px; }
+.project-meta { display: flex; align-items: center; gap: 8px; }
+.badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+.badge.active { background: #e6f4ea; color: var(--line-dark); }
+.badge.paused { background: #fff3e0; color: var(--orange); }
+.badge.completed { background: var(--bg); color: var(--muted); }
+.progress-wrap { flex: 1; }
+.progress-bar { height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 3px; }
+.progress-fill { height: 100%; background: var(--line); border-radius: 3px; transition: width 0.3s; }
+.progress-text { font-size: 11px; color: var(--muted); }
+.project-card-btn { margin-top: 12px; width: 100%; padding: 8px; background: var(--line); color: #fff; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.project-card-btn:active { background: var(--line-dark); }
+
+/* Task list */
+.section-title { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 16px 0 8px; }
+.task-card { background: var(--surface); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.task-check { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; cursor: pointer; flex: 0 0 auto; font-size: 12px; transition: all 0.15s; }
+.task-check.done { background: var(--line); border-color: var(--line); color: #fff; }
+.task-check.progress { background: var(--blue); border-color: var(--blue); color: #fff; }
+.task-title { flex: 1; font-size: 14px; }
+.task-title.done { text-decoration: line-through; color: var(--muted); }
+.task-project { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+/* Claude status */
+.status-card { background: var(--surface); border-radius: var(--radius); padding: 20px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); text-align: center; }
+.status-icon { font-size: 48px; margin-bottom: 8px; }
+.status-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+.status-sub { font-size: 13px; color: var(--muted); }
+.stat-row { display: flex; gap: 10px; margin-top: 16px; }
+.stat-box { flex: 1; background: var(--bg); border-radius: 10px; padding: 12px; text-align: center; }
+.stat-val { font-size: 22px; font-weight: 700; }
+.stat-label { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.resolve-btn { margin-top: 16px; width: 100%; padding: 12px; background: var(--line); color: #fff; border: none; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; }
+
+/* Bottom nav */
+.bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--surface); border-top: 1px solid var(--border); display: flex; padding: 8px 0 20px; z-index: 100; }
+.nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; padding: 4px 0; color: var(--muted); font-size: 10px; }
+.nav-item.active { color: var(--line); }
+.nav-icon { font-size: 22px; }
+
+/* FAB */
+.fab { position: fixed; bottom: 80px; right: 20px; width: 52px; height: 52px; background: var(--line); border-radius: 50%; border: none; color: #fff; font-size: 24px; cursor: pointer; box-shadow: 0 4px 12px rgba(6,199,85,0.4); display: flex; align-items: center; justify-content: center; z-index: 99; }
+
+/* Modal */
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; display: flex; align-items: flex-end; }
+.sheet { background: var(--surface); border-radius: 20px 20px 0 0; width: 100%; padding: 20px; max-height: 80vh; overflow-y: auto; }
+.sheet-handle { width: 40px; height: 4px; background: var(--border); border-radius: 2px; margin: 0 auto 16px; }
+.sheet-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+.field input, .field textarea, .field select { width: 100%; padding: 12px; border: 1.5px solid var(--border); border-radius: 10px; font-size: 14px; }
+.field input:focus, .field textarea:focus, .field select:focus { outline: none; border-color: var(--line); }
+.sheet-btn { width: 100%; padding: 14px; background: var(--line); color: #fff; border: none; border-radius: 12px; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 4px; }
+
+/* Queue */
+.queue-card { background: var(--surface); border-radius: 10px; padding: 14px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.queue-desc { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.queue-ckpt { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+.queue-btns { display: flex; gap: 8px; }
+.queue-btn { flex: 1; padding: 8px; border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.queue-btn.resume { background: var(--line); color: #fff; }
+.queue-btn.cancel { background: var(--bg); color: var(--muted); }
+
+/* Loading / empty */
+.loading { text-align: center; padding: 60px 20px; color: var(--muted); font-size: 14px; }
+.empty { text-align: center; padding: 40px 20px; color: var(--muted); }
+.empty .icon { font-size: 40px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-top">
+    <h1>Project Manager</h1>
+    <img class="avatar" id="avatar" src="" alt="">
+  </div>
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('projects')">專案</div>
+    <div class="tab" onclick="switchTab('tasks')">待辦</div>
+    <div class="tab" onclick="switchTab('claude')">Claude</div>
+  </div>
+</div>
+
+<div id="page-projects" class="page active">
+  <div id="projects-list"><div class="loading">載入中…</div></div>
+</div>
+
+<div id="page-tasks" class="page">
+  <div id="tasks-list"><div class="loading">載入中…</div></div>
+</div>
+
+<div id="page-claude" class="page">
+  <div id="claude-content"><div class="loading">載入中…</div></div>
+</div>
+
+<button class="fab" id="fab" onclick="showFab()">＋</button>
+
+<div class="overlay" id="overlay" style="display:none" onclick="closeSheet(event)">
+  <div class="sheet" id="sheet"></div>
+</div>
+
+<script>
+const API = '';
+const LIFF_ID = '2010243777-kq9FJSJT';
+let currentTab = 'projects';
+let lineProfile = null;
+
+async function init() {
+  try {
+    await liff.init({ liffId: LIFF_ID });
+    if (liff.isLoggedIn()) {
+      lineProfile = await liff.getProfile();
+      const av = document.getElementById('avatar');
+      av.src = lineProfile.pictureUrl;
+      av.style.display = 'block';
+    } else {
+      liff.login();
+    }
+  } catch(e) {
+    console.log('LIFF init failed, running in browser mode');
+  }
+  loadAll();
+}
+
+async function api(path, opts={}) {
+  const res = await fetch(API + path, {
+    headers: {'Content-Type': 'application/json'},
+    ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+function toast(msg) {
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:#24292e;color:#fff;padding:10px 20px;border-radius:20px;font-size:13px;z-index:999;white-space:nowrap';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2000);
+}
+
+function loadAll() {
+  loadProjects();
+  loadTasks();
+  loadClaude();
+}
+
+// === Projects ===
+async function loadProjects() {
+  const projects = await api('/api/projects/');
+  const el = document.getElementById('projects-list');
+  if (!projects.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">📁</div><p>還沒有專案</p></div>';
+    return;
+  }
+  el.innerHTML = projects.map(p => {
+    const tasks = p.tasks || [];
+    const done = tasks.filter(t => t.status === 'completed').length;
+    const pct = tasks.length ? Math.round(done/tasks.length*100) : 0;
+    const statusLabel = {active:'進行中',paused:'暫停',completed:'已完成',archived:'封存'}[p.status]||p.status;
+    return `
+    <div class="project-card">
+      <div class="project-name">${esc(p.name)}</div>
+      <div class="project-desc">${esc(p.description||'')}</div>
+      <div class="project-meta">
+        <span class="badge ${p.status}">${statusLabel}</span>
+        <div class="progress-wrap">
+          <div class="progress-text">${done}/${tasks.length} 任務</div>
+          <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+        </div>
+      </div>
+      <button class="project-card-btn" onclick="showProjectDetail(${p.id},'${esc(p.name)}')">查看詳情</button>
+    </div>`;
+  }).join('');
+}
+
+async function showProjectDetail(id, name) {
+  const p = await api(`/api/projects/${id}`);
+  const milestones = p.milestones || [];
+  const tasks = p.tasks || [];
+  showSheet(`
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">📁 ${esc(p.name)}</div>
+    ${milestones.map(m => {
+      const mTasks = tasks.filter(t => t.milestone_id === m.id);
+      const done = mTasks.filter(t => t.status==='completed').length;
+      return `
+      <div class="section-title">${esc(m.name)} (${done}/${mTasks.length})</div>
+      ${mTasks.map(t => taskHTML(t, id)).join('')}`;
+    }).join('')}
+    <div class="section-title">未分類任務</div>
+    ${tasks.filter(t=>!t.milestone_id).map(t => taskHTML(t, id)).join('')}
+    <div style="margin-top:16px">
+      <input id="new-task-input" placeholder="新增任務…" style="width:100%;padding:12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;margin-bottom:8px">
+      <button class="sheet-btn" onclick="addTaskInline(${id})">新增任務</button>
+    </div>
+  `);
+}
+
+function taskHTML(t, projectId) {
+  const isDone = t.status==='completed';
+  const isProgress = t.status==='in_progress';
+  const checkClass = isDone?'done':isProgress?'progress':'';
+  const checkIcon = isDone?'✓':isProgress?'▶':'';
+  return `
+  <div class="task-card" id="t-${t.id}">
+    <div class="task-check ${checkClass}" onclick="cycleTask(${projectId},${t.id},'${t.status}')">${checkIcon}</div>
+    <div style="flex:1">
+      <div class="task-title ${isDone?'done':''}">${esc(t.title)}</div>
+    </div>
+  </div>`;
+}
+
+async function cycleTask(projectId, taskId, current) {
+  const next = {todo:'in_progress',in_progress:'completed',completed:'todo'};
+  await api(`/api/projects/${projectId}/tasks/${taskId}`, {method:'PATCH', body:{status:next[current]}});
+  showProjectDetail(projectId, '');
+  loadTasks();
+}
+
+async function addTaskInline(projectId) {
+  const title = document.getElementById('new-task-input').value.trim();
+  if (!title) return;
+  await api(`/api/projects/${projectId}/tasks`, {method:'POST', body:{title}});
+  toast('任務已新增');
+  showProjectDetail(projectId, '');
+  loadTasks();
+}
+
+// === Tasks ===
+async function loadTasks() {
+  const projects = await api('/api/projects/');
+  const el = document.getElementById('tasks-list');
+  const todo = [], inprog = [];
+  for (const p of projects) {
+    for (const t of p.tasks||[]) {
+      if (t.status==='in_progress') inprog.push({...t, projectName: p.name, projectId: p.id});
+      else if (t.status==='todo') todo.push({...t, projectName: p.name, projectId: p.id});
+    }
+  }
+  if (!todo.length && !inprog.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">✅</div><p>沒有待辦任務！</p></div>';
+    return;
+  }
+  let html = '';
+  if (inprog.length) {
+    html += '<div class="section-title">進行中</div>';
+    html += inprog.map(t => `
+      <div class="task-card">
+        <div class="task-check progress" onclick="cycleTask(${t.projectId},${t.id},'in_progress')">▶</div>
+        <div style="flex:1">
+          <div class="task-title">${esc(t.title)}</div>
+          <div class="task-project">${esc(t.projectName)}</div>
+        </div>
+      </div>`).join('');
+  }
+  if (todo.length) {
+    html += '<div class="section-title">待做</div>';
+    html += todo.slice(0,15).map(t => `
+      <div class="task-card">
+        <div class="task-check" onclick="cycleTask(${t.projectId},${t.id},'todo')"></div>
+        <div style="flex:1">
+          <div class="task-title">${esc(t.title)}</div>
+          <div class="task-project">${esc(t.projectName)}</div>
+        </div>
+      </div>`).join('');
+  }
+  el.innerHTML = html;
+}
+
+// === Claude ===
+async function loadClaude() {
+  const [s, queue] = await Promise.all([api('/api/claude/status'), api('/api/claude/queue')]);
+  const el = document.getElementById('claude-content');
+  const isOk = !s.is_rate_limited;
+  el.innerHTML = `
+    <div class="status-card">
+      <div class="status-icon">${isOk ? '🟢' : '🔴'}</div>
+      <div class="status-title">${isOk ? 'Claude 可用' : '目前被限速'}</div>
+      <div class="status-sub">${s.is_rate_limited ? `約 ${s.minutes_until_reset ?? '?'} 分鐘後恢復` : '可以正常使用 Claude Code'}</div>
+      <div class="stat-row">
+        <div class="stat-box"><div class="stat-val">${s.today_sessions}</div><div class="stat-label">今日 Sessions</div></div>
+        <div class="stat-box"><div class="stat-val">${fmtNum(s.today_tokens)}</div><div class="stat-label">今日 Tokens</div></div>
+        <div class="stat-box"><div class="stat-val" style="color:var(--orange)">${s.queue_count}</div><div class="stat-label">待續接</div></div>
+      </div>
+      ${s.is_rate_limited ? `<button class="resolve-btn" onclick="resolveRateLimit()">手動解除限速</button>` : ''}
+    </div>
+    ${queue.length ? `
+    <div class="section-title">待續接任務</div>
+    ${queue.map(q => `
+      <div class="queue-card">
+        <div class="queue-desc">${esc(q.description)}</div>
+        ${q.checkpoint ? `<div class="queue-ckpt">${esc(q.checkpoint)}</div>` : ''}
+        <div class="queue-btns">
+          <button class="queue-btn resume" onclick="resumeQueue(${q.id})">已續接</button>
+          <button class="queue-btn cancel" onclick="cancelQueue(${q.id})">取消</button>
+        </div>
+      </div>`).join('')}` : ''}
+    <button onclick="loadClaude()" style="width:100%;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;font-size:13px;cursor:pointer;margin-top:8px">重新整理</button>
+  `;
+}
+
+async function resolveRateLimit() {
+  await api('/api/claude/rate-limit/resolve', {method:'POST'});
+  toast('限速已解除');
+  loadClaude();
+}
+
+async function resumeQueue(id) {
+  await api(`/api/claude/queue/${id}/resume`, {method:'POST'});
+  toast('已標記為續接');
+  loadClaude();
+}
+
+async function cancelQueue(id) {
+  await api(`/api/claude/queue/${id}`, {method:'DELETE'});
+  toast('已取消');
+  loadClaude();
+}
+
+// === FAB ===
+function showFab() {
+  if (currentTab === 'projects') showCreateProject();
+  else if (currentTab === 'tasks') showCreateQueue();
+  else showCreateQueue();
+}
+
+function showCreateProject() {
+  showSheet(`
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">新增專案</div>
+    <div class="field"><label>專案名稱</label><input id="s-name" placeholder="輸入名稱…"></div>
+    <div class="field"><label>說明（選填）</label><input id="s-desc" placeholder="這個專案的目標…"></div>
+    <button class="sheet-btn" onclick="createProject()">建立</button>
+  `);
+}
+
+async function createProject() {
+  const name = document.getElementById('s-name').value.trim();
+  if (!name) return;
+  await api('/api/projects/', {method:'POST', body:{name, description: document.getElementById('s-desc').value}});
+  closeSheetForce();
+  toast('專案已建立');
+  loadProjects();
+}
+
+function showCreateQueue() {
+  showSheet(`
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">加入待續接任務</div>
+    <div class="field"><label>任務描述</label><input id="s-desc" placeholder="要繼續做什麼？"></div>
+    <div class="field"><label>中斷點（選填）</label><input id="s-ckpt" placeholder="上次做到哪裡…"></div>
+    <div class="field"><label>優先度</label>
+      <select id="s-pri"><option value="0">一般</option><option value="1">優先</option></select>
+    </div>
+    <button class="sheet-btn" onclick="createQueue()">加入佇列</button>
+  `);
+}
+
+async function createQueue() {
+  const desc = document.getElementById('s-desc').value.trim();
+  if (!desc) return;
+  await api('/api/claude/queue', {method:'POST', body:{
+    description: desc,
+    checkpoint: document.getElementById('s-ckpt').value,
+    priority: parseInt(document.getElementById('s-pri').value),
+  }});
+  closeSheetForce();
+  toast('已加入佇列');
+  loadClaude();
+}
+
+// === Sheet / Tab ===
+function showSheet(html) {
+  document.getElementById('sheet').innerHTML = html;
+  document.getElementById('overlay').style.display = 'flex';
+}
+function closeSheet(e) { if (e.target===document.getElementById('overlay')) closeSheetForce(); }
+function closeSheetForce() { document.getElementById('overlay').style.display='none'; }
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach((el,i) => {
+    el.classList.toggle('active', ['projects','tasks','claude'][i]===tab);
+  });
+  document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+  document.getElementById(`page-${tab}`).classList.add('active');
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function fmtNum(n) { return n>=1000?(n/1000).toFixed(1)+'k':String(n||0); }
+
+init();
+</script>
+</body>
+</html>

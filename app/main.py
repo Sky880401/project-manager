@@ -49,6 +49,10 @@ def api_explorer():
 def dashboard():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
+@app.get("/liff", include_in_schema=False)
+def liff():
+    return FileResponse(os.path.join(STATIC_DIR, "liff.html"))
+
 
 def backup_database():
     """每小時自動備份 SQLite"""

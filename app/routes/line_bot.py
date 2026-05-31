@@ -3,6 +3,7 @@ from linebot.v3 import WebhookHandler
 from linebot.v3.messaging import (
     Configuration, ApiClient, MessagingApi,
     ReplyMessageRequest, TextMessage, FlexMessage, FlexContainer,
+    URIAction, MessageAction, TemplateMessage, ButtonsTemplate,
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent
 from linebot.v3.exceptions import InvalidSignatureError
@@ -71,6 +72,8 @@ def on_message(event):
             reply(event.reply_token, claude_status_text(db))
         elif text in ["待辦", "todo", "tasks"]:
             reply(event.reply_token, todo_text(db))
+        elif text in ["儀表板", "dashboard", "liff"]:
+            reply(event.reply_token, dashboard_message())
         elif text in ["說明", "help", "?"]:
             reply(event.reply_token, TextMessage(text=help_text()))
         elif text.startswith("新增專案 ") or text.startswith("add "):
@@ -107,9 +110,41 @@ def help_text():
         "專案 — 查看所有專案\n"
         "待辦 — 查看未完成任務\n"
         "狀態 — 查看 Claude 使用狀況\n"
+        "儀表板 — 開啟視覺化介面\n"
         "新增專案 名稱 — 建立新專案\n"
         "完成 任務名稱 — 標記任務完成\n"
         "說明 — 顯示此說明"
+    )
+
+def dashboard_message():
+    return FlexMessage(
+        alt_text="開啟專案管理儀表板",
+        contents=FlexContainer.from_dict({
+            "type": "bubble",
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "contents": [
+                    {"type": "text", "text": "📊 專案管理儀表板", "weight": "bold", "size": "lg"},
+                    {"type": "text", "text": "點下方按鈕開啟視覺化介面", "size": "sm", "color": "#6a737d", "wrap": True},
+                ]
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [{
+                    "type": "button",
+                    "style": "primary",
+                    "color": "#06C755",
+                    "action": {
+                        "type": "uri",
+                        "label": "開啟儀表板",
+                        "uri": f"https://liff.line.me/2010243777-kq9FJSJT"
+                    }
+                }]
+            }
+        })
     )
 
 
