@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 from app.database import get_db, SessionLocal
 from app.models.project import Project, Task, Milestone
 from app.models.claude_usage import LineUser
+from app.models.conversation import Conversation
 from app.services.claude_monitor import get_claude_status
+from app.services.claude_ai import chat_with_claude
 
 load_dotenv()
 
@@ -91,6 +93,10 @@ def on_message(event):
             reply(event.reply_token, todo_text(db))
         elif text in ["儀表板", "dashboard", "liff"]:
             reply(event.reply_token, dashboard_message())
+        elif text in ["清除對話", "clear", "重置"]:
+            db.query(Conversation).filter(Conversation.line_user_id == user_id).delete()
+            db.commit()
+            reply(event.reply_token, TextMessage(text="✅ 對話記錄已清除"))
         elif text in ["說明", "help", "?"]:
             reply(event.reply_token, TextMessage(text=help_text()))
         elif text.startswith("新增專案 ") or text.startswith("add "):
@@ -99,7 +105,25 @@ def on_message(event):
         elif text.startswith("完成 "):
             mark_done(db, text.split(" ", 1)[1].strip(), event.reply_token)
         else:
-            reply(event.reply_token, TextMessage(text=f"不認識這個指令 🤔\n輸入「說明」查看所有指令"))
+            # 其他所有訊息 → 交給 Claude AI 處理
+            if not user_id:
+                reply(event.reply_token, TextMessage(text="無法取得你的 LINE ID"))
+                return
+
+            history = db.query(Conversation).filter(
+                Conversation.line_user_id == user_id
+            ).order_by(Conversation.created_at.asc()).limit(20).all()
+
+            messages = [{"role": h.role, "content": h.content} for h in history]
+            messages.append({"role": "user", "content": text})
+
+            ai_reply = chat_with_claude(messages, db)
+
+            db.add(Conversation(line_user_id=user_id, role="user", content=text))
+            db.add(Conversation(line_user_id=user_id, role="assistant", content=ai_reply))
+            db.commit()
+
+            reply(event.reply_token, TextMessage(text=ai_reply))
     finally:
         db.close()
 
@@ -123,14 +147,17 @@ def welcome_text():
 
 def help_text():
     return (
-        "📋 可用指令：\n\n"
+        "📋 快捷指令：\n\n"
         "專案 — 查看所有專案\n"
         "待辦 — 查看未完成任務\n"
         "狀態 — 查看 Claude 使用狀況\n"
         "儀表板 — 開啟視覺化介面\n"
         "新增專案 名稱 — 建立新專案\n"
         "完成 任務名稱 — 標記任務完成\n"
-        "說明 — 顯示此說明"
+        "清除對話 — 清除 AI 對話記錄\n"
+        "說明 — 顯示此說明\n\n"
+        "💬 直接輸入任何文字就能和 Claude 對話！\n"
+        "例：「幫我列出所有未完成的任務」"
     )
 
 def dashboard_message():
