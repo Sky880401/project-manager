@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
+from datetime import datetime, timezone
+
 from app.database import get_db
 from app.models.project import Project, Milestone, Task
 from app.schemas.project import (
@@ -11,12 +13,19 @@ from app.schemas.project import (
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
+def _now():
+    return datetime.now(timezone.utc)
 
 # === Projects ===
 
 @router.get("/", response_model=List[ProjectOut])
 def list_projects(db: Session = Depends(get_db)):
-    return db.query(Project).all()
+    return db.query(Project).filter(Project.deleted_at.is_(None)).all()
+
+
+@router.get("/trash", response_model=List[ProjectOut])
+def list_trash(db: Session = Depends(get_db)):
+    return db.query(Project).filter(Project.deleted_at.isnot(None)).all()
 
 
 @router.post("/", response_model=ProjectOut, status_code=201)
@@ -30,7 +39,9 @@ def create_project(data: ProjectCreate, db: Session = Depends(get_db)):
 
 @router.get("/{project_id}", response_model=ProjectOut)
 def get_project(project_id: int, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = db.query(Project).filter(
+        Project.id == project_id, Project.deleted_at.is_(None)
+    ).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
@@ -38,7 +49,9 @@ def get_project(project_id: int, db: Session = Depends(get_db)):
 
 @router.patch("/{project_id}", response_model=ProjectOut)
 def update_project(project_id: int, data: ProjectUpdate, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = db.query(Project).filter(
+        Project.id == project_id, Project.deleted_at.is_(None)
+    ).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     for field, value in data.model_dump(exclude_unset=True).items():
@@ -50,18 +63,34 @@ def update_project(project_id: int, data: ProjectUpdate, db: Session = Depends(g
 
 @router.delete("/{project_id}", status_code=204)
 def delete_project(project_id: int, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
+    """軟刪除：設定 deleted_at，資料保留可還原"""
+    project = db.query(Project).filter(
+        Project.id == project_id, Project.deleted_at.is_(None)
+    ).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    db.delete(project)
+    project.deleted_at = _now()
     db.commit()
+
+
+@router.post("/{project_id}/restore", response_model=ProjectOut)
+def restore_project(project_id: int, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(
+        Project.id == project_id, Project.deleted_at.isnot(None)
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found in trash")
+    project.deleted_at = None
+    db.commit()
+    db.refresh(project)
+    return project
 
 
 # === Milestones ===
 
 @router.post("/{project_id}/milestones", response_model=MilestoneOut, status_code=201)
 def create_milestone(project_id: int, data: MilestoneCreate, db: Session = Depends(get_db)):
-    if not db.query(Project).filter(Project.id == project_id).first():
+    if not db.query(Project).filter(Project.id == project_id, Project.deleted_at.is_(None)).first():
         raise HTTPException(status_code=404, detail="Project not found")
     milestone = Milestone(project_id=project_id, **data.model_dump())
     db.add(milestone)
@@ -73,7 +102,9 @@ def create_milestone(project_id: int, data: MilestoneCreate, db: Session = Depen
 @router.patch("/{project_id}/milestones/{milestone_id}", response_model=MilestoneOut)
 def update_milestone(project_id: int, milestone_id: int, data: MilestoneUpdate, db: Session = Depends(get_db)):
     milestone = db.query(Milestone).filter(
-        Milestone.id == milestone_id, Milestone.project_id == project_id
+        Milestone.id == milestone_id,
+        Milestone.project_id == project_id,
+        Milestone.deleted_at.is_(None),
     ).first()
     if not milestone:
         raise HTTPException(status_code=404, detail="Milestone not found")
@@ -87,11 +118,13 @@ def update_milestone(project_id: int, milestone_id: int, data: MilestoneUpdate, 
 @router.delete("/{project_id}/milestones/{milestone_id}", status_code=204)
 def delete_milestone(project_id: int, milestone_id: int, db: Session = Depends(get_db)):
     milestone = db.query(Milestone).filter(
-        Milestone.id == milestone_id, Milestone.project_id == project_id
+        Milestone.id == milestone_id,
+        Milestone.project_id == project_id,
+        Milestone.deleted_at.is_(None),
     ).first()
     if not milestone:
         raise HTTPException(status_code=404, detail="Milestone not found")
-    db.delete(milestone)
+    milestone.deleted_at = _now()
     db.commit()
 
 
@@ -99,7 +132,7 @@ def delete_milestone(project_id: int, milestone_id: int, db: Session = Depends(g
 
 @router.post("/{project_id}/tasks", response_model=TaskOut, status_code=201)
 def create_task(project_id: int, data: TaskCreate, db: Session = Depends(get_db)):
-    if not db.query(Project).filter(Project.id == project_id).first():
+    if not db.query(Project).filter(Project.id == project_id, Project.deleted_at.is_(None)).first():
         raise HTTPException(status_code=404, detail="Project not found")
     task = Task(project_id=project_id, **data.model_dump())
     db.add(task)
@@ -111,7 +144,9 @@ def create_task(project_id: int, data: TaskCreate, db: Session = Depends(get_db)
 @router.patch("/{project_id}/tasks/{task_id}", response_model=TaskOut)
 def update_task(project_id: int, task_id: int, data: TaskUpdate, db: Session = Depends(get_db)):
     task = db.query(Task).filter(
-        Task.id == task_id, Task.project_id == project_id
+        Task.id == task_id,
+        Task.project_id == project_id,
+        Task.deleted_at.is_(None),
     ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -125,9 +160,11 @@ def update_task(project_id: int, task_id: int, data: TaskUpdate, db: Session = D
 @router.delete("/{project_id}/tasks/{task_id}", status_code=204)
 def delete_task(project_id: int, task_id: int, db: Session = Depends(get_db)):
     task = db.query(Task).filter(
-        Task.id == task_id, Task.project_id == project_id
+        Task.id == task_id,
+        Task.project_id == project_id,
+        Task.deleted_at.is_(None),
     ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    db.delete(task)
+    task.deleted_at = _now()
     db.commit()

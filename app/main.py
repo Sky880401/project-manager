@@ -48,6 +48,24 @@ def dashboard():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
+def backup_database():
+    """每小時自動備份 SQLite"""
+    import shutil, glob
+    db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "project_manager.db")
+    backup_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "backups")
+    if not os.path.exists(db_path):
+        return
+    os.makedirs(backup_dir, exist_ok=True)
+    from datetime import datetime
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dest = os.path.join(backup_dir, f"project_manager_{ts}.db")
+    shutil.copy2(db_path, dest)
+    files = sorted(glob.glob(os.path.join(backup_dir, "*.db")))
+    for old in files[:-48]:
+        os.remove(old)
+    logger.info(f"DB backed up → {dest}")
+
+
 def check_rate_limit_reset():
     """每分鐘檢查 rate limit 是否已過期，自動 resolve"""
     from datetime import datetime, timezone
@@ -66,6 +84,7 @@ def check_rate_limit_reset():
 
 scheduler = BackgroundScheduler()
 scheduler.add_job(check_rate_limit_reset, "interval", minutes=1)
+scheduler.add_job(backup_database, "interval", hours=1)
 
 
 @app.on_event("startup")

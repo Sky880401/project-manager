@@ -32,6 +32,7 @@ class Project(Base):
     name = Column(String(200), nullable=False)
     description = Column(Text)
     status = Column(Enum(ProjectStatus), default=ProjectStatus.active)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -48,6 +49,7 @@ class Milestone(Base):
     description = Column(Text)
     status = Column(Enum(MilestoneStatus), default=MilestoneStatus.pending)
     order = Column(Integer, default=0)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -64,8 +66,9 @@ class Task(Base):
     title = Column(String(300), nullable=False)
     description = Column(Text)
     status = Column(Enum(TaskStatus), default=TaskStatus.todo)
-    checkpoint = Column(Text)  # 記錄中斷點，供 Claude 續接用
+    checkpoint = Column(Text)
     order = Column(Integer, default=0)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
