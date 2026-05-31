@@ -12,6 +12,7 @@ from app.routes import projects
 from app.routes import claude as claude_routes
 from app.routes import line_bot
 from app.services.claude_monitor import get_current_rate_limit, resolve_rate_limit
+from app.services.line_push import check_and_notify_rate_limit
 
 load_dotenv()
 
@@ -73,7 +74,7 @@ def backup_database():
 
 
 def check_rate_limit_reset():
-    """每分鐘檢查 rate limit 是否已過期，自動 resolve"""
+    """每分鐘檢查 rate limit 是否已過期，自動 resolve 並發送 LINE 推播"""
     from datetime import datetime, timezone
     db = SessionLocal()
     try:
@@ -84,6 +85,7 @@ def check_rate_limit_reset():
             if now >= reset:
                 resolve_rate_limit(db)
                 logger.info("Rate limit auto-resolved — Claude is available again")
+        check_and_notify_rate_limit(db)
     finally:
         db.close()
 

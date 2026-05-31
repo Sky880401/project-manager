@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 from app.database import get_db, SessionLocal
 from app.models.project import Project, Task, Milestone
+from app.models.claude_usage import LineUser
 from app.services.claude_monitor import get_claude_status
 
 load_dotenv()
@@ -74,6 +75,14 @@ def on_message(event):
 
     db = SessionLocal()
     try:
+        # 記錄 LINE userId
+        user_id = event.source.user_id if hasattr(event.source, 'user_id') else None
+        if user_id:
+            existing = db.query(LineUser).filter(LineUser.user_id == user_id).first()
+            if not existing:
+                db.add(LineUser(user_id=user_id))
+                db.commit()
+
         if text in ["專案", "p", "projects"]:
             reply(event.reply_token, projects_flex(db))
         elif text in ["狀態", "claude", "status"]:

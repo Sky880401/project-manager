@@ -24,10 +24,22 @@ class RateLimitEvent(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     occurred_at = Column(DateTime(timezone=True), server_default=func.now())
-    reset_at = Column(DateTime(timezone=True))    # 估算的重置時間
-    resolved_at = Column(DateTime(timezone=True)) # 實際恢復時間
+    reset_at = Column(DateTime(timezone=True))
+    resolved_at = Column(DateTime(timezone=True))
     is_resolved = Column(Boolean, default=False)
     message = Column(Text)
+    notified = Column(Boolean, default=False)          # 限速通知已發送
+    resolved_notified = Column(Boolean, default=False) # 解除通知已發送
+
+
+class LineUser(Base):
+    __tablename__ = "line_users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(100), unique=True, index=True)
+    display_name = Column(String(200))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
 class ResumeQueue(Base):
