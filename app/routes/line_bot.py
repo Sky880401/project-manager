@@ -8,7 +8,13 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent
 from linebot.v3.exceptions import InvalidSignatureError
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
-import os, json
+import os, json, logging, certifi, ssl
+
+# macOS Python 沒有系統 SSL 憑證，用 certifi 補上
+os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
+
+logger = logging.getLogger(__name__)
 
 from app.database import get_db, SessionLocal
 from app.models.project import Project, Task, Milestone
@@ -35,10 +41,15 @@ def messaging_api():
 async def webhook(request: Request):
     signature = request.headers.get("X-Line-Signature", "")
     body = await request.body()
+    body_str = body.decode()
     try:
-        handler.handle(body.decode(), signature)
+        handler.handle(body_str, signature)
     except InvalidSignatureError:
         raise HTTPException(status_code=400, detail="Invalid signature")
+    except Exception as e:
+        # 記錄錯誤但仍回 200，避免 LINE 不斷重試
+        logger.error(f"Webhook handler error: {e}", exc_info=True)
+        logger.error(f"Raw body: {body_str[:500]}")
     return {"status": "ok"}
 
 
