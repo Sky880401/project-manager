@@ -4,7 +4,8 @@ from typing import List
 from datetime import datetime, timezone, timedelta
 
 from app.database import get_db
-from app.models.claude_usage import ClaudeSession, RateLimitEvent, ResumeQueue
+from app.models.claude_usage import ClaudeSession, RateLimitEvent, ResumeQueue, CodeUsageReport
+from pydantic import BaseModel
 from app.schemas.claude_usage import (
     SessionStart, SessionEnd, SessionOut,
     RateLimitCreate, RateLimitOut,
@@ -21,6 +22,52 @@ router = APIRouter(prefix="/claude", tags=["claude"])
 @router.get("/status", response_model=ClaudeStatusOut)
 def claude_status(db: Session = Depends(get_db)):
     return get_claude_status(db)
+
+
+# === Claude Code 訂閱用量 ===
+
+class CodeUsageIn(BaseModel):
+    window_5h_input: int = 0
+    window_5h_output: int = 0
+    window_5h_cache_read: int = 0
+    window_5h_cache_write: int = 0
+    window_5h_messages: int = 0
+    today_input: int = 0
+    today_output: int = 0
+    today_messages: int = 0
+
+
+@router.post("/code-usage")
+def report_code_usage(data: CodeUsageIn, db: Session = Depends(get_db)):
+    # 只保留最新一筆，刪除舊的
+    db.query(CodeUsageReport).delete()
+    report = CodeUsageReport(**data.model_dump())
+    db.add(report)
+    db.commit()
+    return {"status": "ok"}
+
+
+@router.get("/code-usage")
+def get_code_usage(db: Session = Depends(get_db)):
+    report = db.query(CodeUsageReport).order_by(CodeUsageReport.reported_at.desc()).first()
+    if not report:
+        return {"available": False}
+    return {
+        "available": True,
+        "window_5h": {
+            "input": report.window_5h_input,
+            "output": report.window_5h_output,
+            "cache_read": report.window_5h_cache_read,
+            "cache_write": report.window_5h_cache_write,
+            "messages": report.window_5h_messages,
+        },
+        "today": {
+            "input": report.today_input,
+            "output": report.today_output,
+            "messages": report.today_messages,
+        },
+        "reported_at": report.reported_at.isoformat() if report.reported_at else None,
+    }
 
 
 # === Sessions ===

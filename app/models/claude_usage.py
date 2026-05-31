@@ -32,6 +32,22 @@ class RateLimitEvent(Base):
     resolved_notified = Column(Boolean, default=False) # 解除通知已發送
 
 
+class CodeUsageReport(Base):
+    """Claude Code 訂閱用量回報（從 bmo transcript 解析）"""
+    __tablename__ = "code_usage_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    window_5h_input = Column(Integer, default=0)
+    window_5h_output = Column(Integer, default=0)
+    window_5h_cache_read = Column(Integer, default=0)
+    window_5h_cache_write = Column(Integer, default=0)
+    window_5h_messages = Column(Integer, default=0)
+    today_input = Column(Integer, default=0)
+    today_output = Column(Integer, default=0)
+    today_messages = Column(Integer, default=0)
+    reported_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class LineUser(Base):
     __tablename__ = "line_users"
 

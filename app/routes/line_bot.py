@@ -95,6 +95,8 @@ def on_message(event):
             reply(event.reply_token, dashboard_message())
         elif text in ["用量", "usage", "費用"]:
             reply(event.reply_token, usage_text(db))
+        elif text in ["code用量", "code", "額度"]:
+            reply(event.reply_token, code_usage_text(db))
         elif text in ["清除對話", "clear", "重置"]:
             db.query(Conversation).filter(Conversation.line_user_id == user_id).delete()
             db.commit()
@@ -175,6 +177,32 @@ def usage_text(db):
     ))
 
 
+def code_usage_text(db):
+    from app.models.claude_usage import CodeUsageReport
+    r = db.query(CodeUsageReport).order_by(CodeUsageReport.reported_at.desc()).first()
+    if not r:
+        return TextMessage(text="尚無 Claude Code 用量資料\n（需在 bmo 上執行回報腳本）")
+
+    def fmt_num(n):
+        return f"{n/1000:.1f}k" if n >= 1000 else str(n)
+
+    reported = r.reported_at.strftime('%H:%M') if r.reported_at else '?'
+    return TextMessage(text=(
+        "🖥 Claude Code 用量\n"
+        "（訂閱方案 5 小時滾動視窗）\n\n"
+        f"📊 最近 5 小時：\n"
+        f"  訊息：{r.window_5h_messages} 則\n"
+        f"  輸入：{fmt_num(r.window_5h_input)} tokens\n"
+        f"  輸出：{fmt_num(r.window_5h_output)} tokens\n"
+        f"  快取讀取：{fmt_num(r.window_5h_cache_read)} tokens\n\n"
+        f"📅 今日累計：\n"
+        f"  訊息：{r.today_messages} 則\n"
+        f"  輸入：{fmt_num(r.today_input)} tokens\n"
+        f"  輸出：{fmt_num(r.today_output)} tokens\n\n"
+        f"更新於 {reported}"
+    ))
+
+
 def help_text():
     return (
         "📋 快捷指令：\n\n"
@@ -184,7 +212,8 @@ def help_text():
         "儀表板 — 開啟視覺化介面\n"
         "新增專案 名稱 — 建立新專案\n"
         "完成 任務名稱 — 標記任務完成\n"
-        "用量 — 查看 API 用量與費用\n"
+        "用量 — 查看 API 對話費用\n"
+        "code用量 — 查看 Claude Code 額度\n"
         "清除對話 — 清除 AI 對話記錄\n"
         "說明 — 顯示此說明\n\n"
         "💬 AI 對話（/ 開頭）：\n"
