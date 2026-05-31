@@ -9,7 +9,7 @@ import uuid
 import os
 from datetime import datetime, timezone
 
-API_URL = os.getenv("PM_API_URL", "http://localhost:8000")
+API_URL = os.getenv("PM_API_URL", "https://lxc.tail92862c.ts.net")
 
 try:
     hook_input = json.load(sys.stdin)
