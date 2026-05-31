@@ -8,3 +8,4 @@ psycopg2-binary==2.9.10
 apscheduler==3.11.2
 httpx==0.28.1
 aiofiles==25.1.0
+line-bot-sdk==3.23.0
