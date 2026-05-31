@@ -106,17 +106,16 @@ def on_message(event):
             create_project(db, name, event.reply_token)
         elif text.startswith("完成 "):
             mark_done(db, text.split(" ", 1)[1].strip(), event.reply_token)
-        elif text.startswith(("AI ", "ai ", "問 ", "A:", "a:")):
-            # 明確前綴才觸發 Claude AI
+        elif text.startswith("/"):
+            # / 前綴觸發 Claude AI
             if not user_id:
                 reply(event.reply_token, TextMessage(text="無法取得你的 LINE ID"))
                 return
 
-            # 移除前綴，取得實際問題
-            for prefix in ("AI ", "ai ", "問 ", "A:", "a:"):
-                if text.startswith(prefix):
-                    question = text[len(prefix):].strip()
-                    break
+            question = text[1:].strip()
+            if not question:
+                reply(event.reply_token, TextMessage(text="請在 / 後面輸入問題\n例：/幫我列出未完成的任務"))
+                return
 
             history = db.query(Conversation).filter(
                 Conversation.line_user_id == user_id
@@ -188,9 +187,9 @@ def help_text():
         "用量 — 查看 API 用量與費用\n"
         "清除對話 — 清除 AI 對話記錄\n"
         "說明 — 顯示此說明\n\n"
-        "💬 AI 對話（加前綴才觸發）：\n"
-        "  AI 幫我列出未完成的任務\n"
-        "  問 現在 Claude 可以用嗎？"
+        "💬 AI 對話（/ 開頭）：\n"
+        "  /幫我列出未完成的任務\n"
+        "  /現在 Claude 可以用嗎？"
     )
 
 def dashboard_message():
