@@ -213,9 +213,20 @@ async function loadProjects() {
           <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
         </div>
       </div>
-      <button class="project-card-btn" onclick="showProjectDetail(${p.id},'${esc(p.name)}')">查看詳情</button>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="project-card-btn" style="flex:1;margin-top:0" onclick="showProjectDetail(${p.id},'${esc(p.name)}')">查看詳情</button>
+        <button class="project-card-btn" style="flex:0 0 auto;margin-top:0;background:var(--red);width:48px" onclick="deleteProject(${p.id},'${esc(p.name)}')">🗑</button>
+      </div>
     </div>`;
   }).join('');
+}
+
+async function deleteProject(id, name) {
+  if (!confirm(`確定刪除專案「${name}」？\n（可在垃圾桶還原）`)) return;
+  await api(`/api/projects/${id}`, {method:'DELETE'});
+  toast('專案已刪除');
+  loadProjects();
+  loadTasks();
 }
 
 async function showProjectDetail(id, name) {
