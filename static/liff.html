@@ -256,7 +256,20 @@ function taskHTML(t, projectId) {
 
 async function cycleTask(projectId, taskId, current) {
   const next = {todo:'in_progress',in_progress:'completed',completed:'todo'};
-  await api(`/api/projects/${projectId}/tasks/${taskId}`, {method:'PATCH', body:{status:next[current]}});
+  const nextStatus = next[current];
+  const res = await api(`/api/projects/${projectId}/tasks/${taskId}`, {method:'PATCH', body:{status:nextStatus}});
+
+  if (nextStatus === 'completed' && liff.isInClient()) {
+    try {
+      await liff.sendMessages([{
+        type: 'text',
+        text: `✅ 完成任務：${res.title}`
+      }]);
+    } catch(e) {
+      console.log('sendMessages failed:', e);
+    }
+  }
+
   showProjectDetail(projectId, '');
   loadTasks();
 }
