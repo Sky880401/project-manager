@@ -1,0 +1,27 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      - DATABASE_URL=postgresql://pm_user:pm_password@db:5432/project_manager
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pm_user
+      POSTGRES_PASSWORD: pm_password
+      POSTGRES_DB: project_manager
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
