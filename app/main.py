@@ -11,6 +11,7 @@ from app.database import engine, Base, SessionLocal
 from app.routes import projects
 from app.routes import claude as claude_routes
 from app.routes import line_bot
+from app.routes import hermes
 from app.services.claude_monitor import get_current_rate_limit, resolve_rate_limit
 from app.services.line_push import check_and_notify_rate_limit
 
@@ -36,6 +37,7 @@ app.add_middleware(
 
 app.include_router(projects.router, prefix="/api")
 app.include_router(claude_routes.router, prefix="/api")
+app.include_router(hermes.router, prefix="/api")
 app.include_router(line_bot.router)
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")

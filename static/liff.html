@@ -596,7 +596,19 @@ async function showEditTask(projectId, taskId) {
       <textarea id="et-desc" rows="3" style="resize:vertical;font-family:inherit">${esc(t.description||'')}</textarea>
     </div>
     <button class="sheet-btn" onclick="saveTask(${projectId},${taskId})">儲存</button>
+    <button class="sheet-btn" style="background:#5b4ee5;margin-top:8px" onclick="dispatchHermes(${projectId},${taskId})">🤖 交給 Hermes 執行</button>
   `);
+}
+async function dispatchHermes(projectId, taskId) {
+  const title = document.getElementById('et-title').value.trim();
+  if (!title) return;
+  const desc = document.getElementById('et-desc').value.trim();
+  const prompt = desc ? `${title}\n\n${desc}` : title;
+  await api('/api/hermes/jobs', {method:'POST', body:{prompt, task_id: taskId}});
+  closeSheetForce();
+  toast('已派給 Hermes 執行 🤖');
+  switchTab('claude');
+  loadClaude();
 }
 async function saveTask(projectId, taskId) {
   const title = document.getElementById('et-title').value.trim();
@@ -758,8 +770,22 @@ function renderCodeUsage(cu) {
   </div>`;
 }
 
+function renderHermes(jobs) {
+  if (!jobs || !jobs.length) return '';
+  const badge = {queued:'⏳ 排隊中',running:'⚙️ 執行中',done:'✅ 完成',error:'⚠️ 失敗'};
+  return `
+    <div class="section-title">🤖 Hermes 任務</div>
+    ${jobs.slice(0,8).map(j => `
+      <div class="queue-card">
+        <div class="queue-desc">#${j.id} ${esc((j.prompt||'').split('\\n')[0])}</div>
+        <div class="queue-ckpt">${badge[j.status]||j.status}</div>
+        ${j.status==='done' && j.result ? `<div class="task-desc" style="max-height:120px;overflow:auto">${esc(j.result)}</div>` : ''}
+        ${j.status==='error' && j.error ? `<div class="task-desc" style="color:var(--red)">${esc(j.error)}</div>` : ''}
+      </div>`).join('')}`;
+}
+
 async function loadClaude() {
-  const [s, queue, cu] = await Promise.all([api('/api/claude/status'), api('/api/claude/queue'), api('/api/claude/code-usage')]);
+  const [s, queue, cu, hjobs] = await Promise.all([api('/api/claude/status'), api('/api/claude/queue'), api('/api/claude/code-usage'), api('/api/hermes/jobs')]);
   const el = document.getElementById('claude-content');
   const isOk = !s.is_rate_limited;
   el.innerHTML = `
@@ -775,6 +801,7 @@ async function loadClaude() {
       ${s.is_rate_limited ? `<button class="resolve-btn" onclick="resolveRateLimit()">手動解除限速</button>` : ''}
     </div>
     ${renderCodeUsage(cu)}
+    ${renderHermes(hjobs)}
     ${queue.length ? `
     <div class="section-title">待續接任務</div>
     ${queue.map(q => `

@@ -72,3 +72,19 @@ class ResumeQueue(Base):
     queued_at = Column(DateTime(timezone=True), server_default=func.now())
     resumed_at = Column(DateTime(timezone=True))
     priority = Column(Integer, default=0)
+
+
+class HermesJob(Base):
+    """交給 bmo 上的 Hermes worker 用 Claude Code headless 執行的任務。"""
+    __tablename__ = "hermes_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    prompt = Column(Text, nullable=False)          # 要執行的內容
+    task_id = Column(Integer, nullable=True)        # 來源 tasks.id（選填）
+    status = Column(String(20), default="queued")   # queued / running / done / error
+    result = Column(Text)                            # 執行輸出
+    error = Column(Text)                             # 錯誤訊息
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    started_at = Column(DateTime(timezone=True))
+    finished_at = Column(DateTime(timezone=True))
+    notified = Column(Boolean, default=False)
