@@ -90,7 +90,7 @@ def create_job(data: JobCreate, db: Session = Depends(get_db)):
     if ALLOWED_USERS:
         sub = _verify_line_user(data.id_token)
         if sub not in ALLOWED_USERS:
-            raise HTTPException(status_code=403, detail="只有授權的 LINE 帳號能派工給 Hermes")
+            raise HTTPException(status_code=403, detail="只有授權的 LINE 帳號能派工給 BMO")
     job = HermesJob(prompt=data.prompt.strip(), task_id=data.task_id, status="queued")
     db.add(job)
     db.commit()
@@ -143,9 +143,9 @@ def complete_job(job_id: int, data: JobComplete,
     head = (job.prompt or "")[:40]
     if job.status == "done":
         snippet = (job.result or "")[-400:]
-        msg = f"🤖 Hermes 完成任務 #{job.id}\n「{head}」\n\n{snippet}"
+        msg = f"🤖 BMO 完成任務 #{job.id}\n「{head}」\n\n{snippet}"
     else:
-        msg = f"⚠️ Hermes 任務 #{job.id} 失敗\n「{head}」\n\n{(job.error or '')[:300]}"
+        msg = f"⚠️ BMO 任務 #{job.id} 失敗\n「{head}」\n\n{(job.error or '')[:300]}"
     try:
         push_to_all(db, msg)
         job.notified = True

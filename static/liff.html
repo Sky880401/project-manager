@@ -560,7 +560,7 @@ async function showProjectDetail(id, name) {
     })()}
     <div style="margin-top:16px">
       <input id="new-task-input" placeholder="新增任務…" style="width:100%;padding:12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;margin-bottom:8px">
-      <textarea id="new-task-desc" placeholder="描述（選填，可寫詳細需求供 Hermes 讀取）" rows="2" style="width:100%;padding:12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;margin-bottom:8px;resize:vertical;font-family:inherit"></textarea>
+      <textarea id="new-task-desc" placeholder="描述（選填，可寫詳細需求供 BMO 讀取）" rows="2" style="width:100%;padding:12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;margin-bottom:8px;resize:vertical;font-family:inherit"></textarea>
       <button class="sheet-btn" onclick="addTaskInline(${id})">新增任務</button>
     </div>
   `);
@@ -596,10 +596,10 @@ async function showEditTask(projectId, taskId) {
       <textarea id="et-desc" rows="3" style="resize:vertical;font-family:inherit">${esc(t.description||'')}</textarea>
     </div>
     <button class="sheet-btn" onclick="saveTask(${projectId},${taskId})">儲存</button>
-    <button class="sheet-btn" style="background:#5b4ee5;margin-top:8px" onclick="dispatchHermes(${projectId},${taskId})">🤖 交給 Hermes 執行</button>
+    <button class="sheet-btn" style="background:#5b4ee5;margin-top:8px" onclick="dispatchBmo(${projectId},${taskId})">🤖 交給 BMO 執行</button>
   `);
 }
-async function dispatchHermes(projectId, taskId) {
+async function dispatchBmo(projectId, taskId) {
   const title = document.getElementById('et-title').value.trim();
   if (!title) return;
   const desc = document.getElementById('et-desc').value.trim();
@@ -613,7 +613,7 @@ async function dispatchHermes(projectId, taskId) {
   if (res.status === 403) { toast('未授權：只有你本人能派工'); return; }
   if (!res.ok) { toast('派工失敗'); return; }
   closeSheetForce();
-  toast('已派給 Hermes 執行 🤖');
+  toast('已派給 BMO 執行 🤖');
   switchTab('claude');
   loadClaude();
 }
@@ -777,11 +777,11 @@ function renderCodeUsage(cu) {
   </div>`;
 }
 
-function renderHermes(jobs) {
+function renderBmo(jobs) {
   if (!jobs || !jobs.length) return '';
   const badge = {queued:'⏳ 排隊中',running:'⚙️ 執行中',done:'✅ 完成',error:'⚠️ 失敗'};
   return `
-    <div class="section-title">🤖 Hermes 任務</div>
+    <div class="section-title">🤖 BMO 任務</div>
     ${jobs.slice(0,8).map(j => `
       <div class="queue-card">
         <div class="queue-desc">#${j.id} ${esc((j.prompt||'').split('\\n')[0])}</div>
@@ -808,7 +808,7 @@ async function loadClaude() {
       ${s.is_rate_limited ? `<button class="resolve-btn" onclick="resolveRateLimit()">手動解除限速</button>` : ''}
     </div>
     ${renderCodeUsage(cu)}
-    ${renderHermes(hjobs)}
+    ${renderBmo(hjobs)}
     ${queue.length ? `
     <div class="section-title">待續接任務</div>
     ${queue.map(q => `
