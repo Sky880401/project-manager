@@ -276,7 +276,7 @@ async function renderProjectDetail() {
     <div class="section-title" style="margin-top:20px">未分類任務</div>
     <div class="milestone-card">
       <div class="milestone-body">
-        ${looseTasks.map(t => renderTask(t, project.id)).join('')}
+        ${sortTasks(looseTasks).map(t => renderTask(t, project.id)).join('')}
         <div class="add-task-row">
           <div class="inline-form">
             <input id="loose-task-input" placeholder="新增任務…" onkeydown="if(event.key==='Enter')addTask(${project.id}, null, 'loose-task-input')">
@@ -300,7 +300,7 @@ function renderMilestone(m, project) {
       <button class="btn sm danger" onclick="event.stopPropagation();deleteMilestone(${project.id},${m.id})">刪除</button>
     </div>
     <div class="milestone-body" id="ms-body-${m.id}">
-      ${tasks.map(t => renderTask(t, project.id)).join('')}
+      ${sortTasks(tasks).map(t => renderTask(t, project.id)).join('')}
       <div class="add-task-row">
         <div class="inline-form">
           <input id="task-input-${m.id}" placeholder="新增任務…" onkeydown="if(event.key==='Enter')addTask(${project.id},${m.id},'task-input-${m.id}')">
@@ -309,6 +309,17 @@ function renderMilestone(m, project) {
       </div>
     </div>
   </div>`;
+}
+
+// 任務排序：未完成在前（依紅→黃→綠燈），已完成/暫停在最後
+function sortTasks(tasks) {
+  const doneRank = t => (t.status === 'completed' || t.status === 'paused') ? 1 : 0;
+  const priRank = { high: 0, medium: 1, low: 2 };
+  return [...tasks].sort((a, b) =>
+    doneRank(a) - doneRank(b) ||
+    (priRank[a.priority] ?? 1) - (priRank[b.priority] ?? 1) ||
+    (a.order || 0) - (b.order || 0)
+  );
 }
 
 function renderTask(t, projectId) {
