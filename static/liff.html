@@ -66,6 +66,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .task-prio.medium { background: #fbc02d; }
 .task-prio.low { background: #43a047; }
 .task-project { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.task-desc { font-size: 12px; color: var(--muted); margin-top: 3px; white-space: pre-wrap; word-break: break-word; }
 
 /* Claude status */
 .status-card { background: var(--surface); border-radius: var(--radius); padding: 20px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); text-align: center; }
@@ -385,6 +386,7 @@ async function showProjectDetail(id, name) {
     })()}
     <div style="margin-top:16px">
       <input id="new-task-input" placeholder="新增任務…" style="width:100%;padding:12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;margin-bottom:8px">
+      <textarea id="new-task-desc" placeholder="描述（選填，可寫詳細需求供 Hermes 讀取）" rows="2" style="width:100%;padding:12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;margin-bottom:8px;resize:vertical;font-family:inherit"></textarea>
       <button class="sheet-btn" onclick="addTaskInline(${id})">新增任務</button>
     </div>
   `);
@@ -400,8 +402,9 @@ function taskHTML(t, projectId) {
   return `
   <div class="task-card" id="t-${t.id}">
     <div class="task-check ${checkClass}" onclick="cycleTask(${projectId},${t.id},'${t.status}')">${checkIcon}</div>
-    <div style="flex:1">
+    <div style="flex:1;min-width:0">
       <div class="task-title ${isDone?'done':''}">${esc(t.title)}</div>
+      ${t.description ? `<div class="task-desc">${esc(t.description)}</div>` : ''}
     </div>
     <div class="task-prio ${prio}" title="${prioTitle}" onclick="cyclePriority(${projectId},${t.id},'${prio}')"></div>
   </div>`;
@@ -449,7 +452,8 @@ async function cycleTask(projectId, taskId, current) {
 async function addTaskInline(projectId) {
   const title = document.getElementById('new-task-input').value.trim();
   if (!title) return;
-  await api(`/api/projects/${projectId}/tasks`, {method:'POST', body:{title}});
+  const description = document.getElementById('new-task-desc').value.trim();
+  await api(`/api/projects/${projectId}/tasks`, {method:'POST', body:{title, description: description || null}});
   toast('任務已新增');
   showProjectDetail(projectId, '');
   loadTasks();
