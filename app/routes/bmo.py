@@ -230,12 +230,20 @@ def complete_job(job_id: int, data: JobComplete,
     if data.diff is not None:
         job.diff = data.diff
     job.finished_at = _now()
+    # 部署成功 → 自動隱藏來源任務（其分支已合併，避免再按到失效的「合併並上線」）
+    if job.kind == "deploy" and job.status == "done" and job.parent_id:
+        parent = db.query(BmoJob).filter(BmoJob.id == job.parent_id).first()
+        if parent:
+            parent.archived = True
+        job.archived = True
     db.commit()
     db.refresh(job)
 
     # LINE 通知
     head = (job.prompt or "")[:40]
-    if job.status == "done":
+    if job.kind == "deploy" and job.status == "done":
+        msg = f"🚀 BMO 已合併並上線 #{job.id}\n{(job.result or '')[-300:]}"
+    elif job.status == "done":
         snippet = (job.result or "")[-400:]
         msg = f"🤖 BMO 完成任務 #{job.id}\n「{head}」\n\n{snippet}"
     else:
