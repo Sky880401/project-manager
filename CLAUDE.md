@@ -45,3 +45,15 @@ alembic/           # DB migration
 backups/           # 自動備份（不進 git）
 scripts/           # 工具腳本
 ```
+
+## ⭐ 前端介面對應（改 UI 前務必看清楚改哪個檔）
+使用者**幾乎都在 LINE 上操作**，所以多數 UI 需求指的是 LIFF：
+
+| 檔案 | 路由 | 是什麼 | 何時改它 |
+|---|---|---|---|
+| `static/liff.html` | `/liff` | **LINE 內的 LIFF 介面（主要！）** | 使用者說「在 LINE 上 / 手機 / LIFF」看到的任何 UI 需求 |
+| `static/index.html` | `/dashboard` | 網頁版儀表板（桌機瀏覽器用，較少用） | 明確指定「網頁版 / dashboard」時才改 |
+| `static/api-explorer.html` | `/api-explorer` | API 測試頁 | 幾乎不動 |
+
+- 兩個 HTML 有**各自獨立**的 JS（如各自的 `sortTasks`、`showProjectDetail`），改了一個**不會**自動同步到另一個。
+- 接到 UI 需求若沒指明檔案，**預設改 `liff.html`**；若兩邊都該一致，要明講「兩個都改」。
