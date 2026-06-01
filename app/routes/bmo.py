@@ -230,11 +230,11 @@ def complete_job(job_id: int, data: JobComplete,
     if data.diff is not None:
         job.diff = data.diff
     job.finished_at = _now()
-    # 部署成功 → 自動隱藏來源任務（其分支已合併，避免再按到失效的「合併並上線」）
-    if job.kind == "deploy" and job.status == "done" and job.parent_id:
-        parent = db.query(BmoJob).filter(BmoJob.id == job.parent_id).first()
-        if parent:
-            parent.archived = True
+    # 部署成功 → 把「同一條分支」的所有 job 一起隱藏（整條 task→comment 迭代鏈），
+    # 避免分支已合併刪除後，鏈上較早的 job 還留著失效的「合併並上線」按鈕
+    if job.kind == "deploy" and job.status == "done":
+        if job.branch:
+            db.query(BmoJob).filter(BmoJob.branch == job.branch).update({"archived": True})
         job.archived = True
     db.commit()
     db.refresh(job)
