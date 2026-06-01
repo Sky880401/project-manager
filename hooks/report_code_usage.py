@@ -18,6 +18,8 @@ today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 w = {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "messages": 0}
 t = {"input": 0, "output": 0, "messages": 0}
 earliest_in_window = None  # 視窗內最早一筆訊息時間（用來算重置）
+latest_model = None        # 最近一筆 assistant 訊息使用的模型
+latest_model_ts = None
 
 
 def parse_ts(d):
@@ -47,6 +49,11 @@ for path in glob.glob(os.path.join(PROJECTS_DIR, "**", "*.jsonl"), recursive=Tru
                 ts = parse_ts(d)
                 if not ts:
                     continue
+
+                model = msg.get("model")
+                if model and (latest_model_ts is None or ts > latest_model_ts):
+                    latest_model = model
+                    latest_model_ts = ts
 
                 inp = usage.get("input_tokens", 0)
                 out = usage.get("output_tokens", 0)
@@ -78,6 +85,7 @@ payload = {
     "today_output": t["output"],
     "today_messages": t["messages"],
     "window_earliest": earliest_in_window.isoformat() if earliest_in_window else None,
+    "current_model": latest_model,
 }
 
 try:

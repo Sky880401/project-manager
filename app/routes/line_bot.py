@@ -93,10 +93,10 @@ def on_message(event):
             reply(event.reply_token, todo_text(db))
         elif text in ["儀表板", "dashboard", "liff"]:
             reply(event.reply_token, dashboard_message())
-        elif text in ["用量", "usage", "費用"]:
-            reply(event.reply_token, usage_text(db))
-        elif text in ["code用量", "code", "額度"]:
+        elif text in ["用量", "usage", "code用量", "code", "額度"]:
             reply(event.reply_token, code_usage_text(db))
+        elif text in ["費用", "api", "api用量"]:
+            reply(event.reply_token, usage_text(db))
         elif text in ["清除對話", "clear", "重置"]:
             db.query(Conversation).filter(Conversation.line_user_id == user_id).delete()
             db.commit()
@@ -177,6 +177,24 @@ def usage_text(db):
     ))
 
 
+# 訂閱方案目前可用的模型（無 API 可查，靜態維護）
+AVAILABLE_MODELS = ["Opus 4.8", "Sonnet 4.6", "Haiku 4.5"]
+
+# 模型 id → 友善名稱
+def model_label(model_id):
+    if not model_id:
+        return "未知"
+    m = model_id.lower()
+    if "opus" in m:
+        ver = "4.8" if "4-8" in m else ("4.7" if "4-7" in m else "")
+        return f"Opus {ver}".strip()
+    if "sonnet" in m:
+        return "Sonnet 4.6" if "4-6" in m else "Sonnet"
+    if "haiku" in m:
+        return "Haiku 4.5" if "4-5" in m else "Haiku"
+    return model_id
+
+
 def code_usage_text(db):
     from app.models.claude_usage import CodeUsageReport
     r = db.query(CodeUsageReport).order_by(CodeUsageReport.reported_at.desc()).first()
@@ -187,9 +205,13 @@ def code_usage_text(db):
         return f"{n/1000:.1f}k" if n >= 1000 else str(n)
 
     reported = r.reported_at.strftime('%H:%M') if r.reported_at else '?'
+    current = model_label(getattr(r, "current_model", None))
+    available = "、".join(AVAILABLE_MODELS)
     return TextMessage(text=(
         "🖥 Claude Code 用量\n"
         "（訂閱方案 5 小時滾動視窗）\n\n"
+        f"🤖 目前模型：{current}\n"
+        f"📦 可用模型：{available}\n\n"
         f"📊 最近 5 小時：\n"
         f"  訊息：{r.window_5h_messages} 則\n"
         f"  輸入：{fmt_num(r.window_5h_input)} tokens\n"
@@ -212,8 +234,8 @@ def help_text():
         "儀表板 — 開啟視覺化介面\n"
         "新增專案 名稱 — 建立新專案\n"
         "完成 任務名稱 — 標記任務完成\n"
-        "用量 — 查看 API 對話費用\n"
-        "code用量 — 查看 Claude Code 額度\n"
+        "用量 — 查看 Claude Code 模型與額度\n"
+        "費用 — 查看 API 對話費用\n"
         "清除對話 — 清除 AI 對話記錄\n"
         "說明 — 顯示此說明\n\n"
         "💬 AI 對話（/ 開頭）：\n"

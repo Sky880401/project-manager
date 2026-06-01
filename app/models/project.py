@@ -25,6 +25,12 @@ class MilestoneStatus(str, enum.Enum):
     completed = "completed"
 
 
+class TaskPriority(str, enum.Enum):
+    high = "high"      # 紅燈
+    medium = "medium"  # 黃燈
+    low = "low"        # 綠燈
+
+
 class Project(Base):
     __tablename__ = "projects"
 
@@ -66,6 +72,7 @@ class Task(Base):
     title = Column(String(300), nullable=False)
     description = Column(Text)
     status = Column(Enum(TaskStatus), default=TaskStatus.todo)
+    priority = Column(Enum(TaskPriority), default=TaskPriority.medium, nullable=False)
     checkpoint = Column(Text)
     order = Column(Integer, default=0)
     deleted_at = Column(DateTime(timezone=True), nullable=True)

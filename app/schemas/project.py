@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
-from app.models.project import ProjectStatus, TaskStatus, MilestoneStatus
+from app.models.project import ProjectStatus, TaskStatus, MilestoneStatus, TaskPriority
 
 
 # --- Task Schemas ---
@@ -9,6 +9,7 @@ class TaskBase(BaseModel):
     title: str
     description: Optional[str] = None
     milestone_id: Optional[int] = None
+    priority: Optional[TaskPriority] = TaskPriority.medium
     order: Optional[int] = 0
 
 class TaskCreate(TaskBase):
@@ -18,6 +19,7 @@ class TaskUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     status: Optional[TaskStatus] = None
+    priority: Optional[TaskPriority] = None
     milestone_id: Optional[int] = None
     checkpoint: Optional[str] = None
     order: Optional[int] = None

@@ -36,6 +36,7 @@ class CodeUsageIn(BaseModel):
     today_output: int = 0
     today_messages: int = 0
     window_earliest: datetime | None = None
+    current_model: str | None = None
 
 
 @router.post("/code-usage")
@@ -67,6 +68,7 @@ def get_code_usage(db: Session = Depends(get_db)):
             "output": report.today_output,
             "messages": report.today_messages,
         },
+        "current_model": report.current_model,
         "reported_at": report.reported_at.isoformat() if report.reported_at else None,
     }
 

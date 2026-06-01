@@ -46,6 +46,7 @@ class CodeUsageReport(Base):
     today_output = Column(Integer, default=0)
     today_messages = Column(Integer, default=0)
     window_earliest = Column(DateTime(timezone=True), nullable=True)
+    current_model = Column(String(100), nullable=True)  # 最近一次使用的模型 id
     reported_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
