@@ -606,7 +606,7 @@ async function dispatchBmo(projectId, taskId) {
   const prompt = desc ? `${title}\n\n${desc}` : title;
   let id_token = null;
   try { id_token = liff.getIDToken(); } catch(_) {}
-  const res = await fetch(API + '/api/hermes/jobs', {
+  const res = await fetch(API + '/api/bmo/jobs', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({prompt, task_id: taskId, id_token}),
   });
@@ -784,15 +784,39 @@ function renderBmo(jobs) {
     <div class="section-title">🤖 BMO 任務</div>
     ${jobs.slice(0,8).map(j => `
       <div class="queue-card">
-        <div class="queue-desc">#${j.id} ${esc((j.prompt||'').split('\\n')[0])}</div>
-        <div class="queue-ckpt">${badge[j.status]||j.status}</div>
+        <div class="queue-desc">#${j.id} ${esc((j.prompt||'').split('\\n')[0])}${j.parent_id?` <span style="color:var(--muted);font-weight:400">(延續 #${j.parent_id})</span>`:''}</div>
+        <div class="queue-ckpt">${badge[j.status]||j.status}${j.branch?` · 🌿 ${esc(j.branch)}`:''}</div>
         ${j.status==='done' && j.result ? `<div class="task-desc" style="max-height:120px;overflow:auto">${esc(j.result)}</div>` : ''}
         ${j.status==='error' && j.error ? `<div class="task-desc" style="color:var(--red)">${esc(j.error)}</div>` : ''}
+        ${j.status==='done' && j.diff ? `
+          <details style="margin-top:8px">
+            <summary style="font-size:12px;color:var(--blue);cursor:pointer">查看變更 diff</summary>
+            <pre style="background:#0d1117;color:#c9d1d9;font-size:11px;padding:10px;border-radius:8px;overflow:auto;max-height:240px;margin-top:6px;white-space:pre">${esc(j.diff)}</pre>
+          </details>
+          <textarea id="cmt-${j.id}" placeholder="對這次變更下 comment，回傳給 BMO 判斷下一步…" rows="2" style="width:100%;margin-top:8px;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;resize:vertical;font-family:inherit"></textarea>
+          <button class="queue-btn resume" style="margin-top:6px;width:100%" onclick="commentBmo(${j.id})">💬 回傳 comment 給 BMO</button>
+        ` : ''}
       </div>`).join('')}`;
 }
 
+async function commentBmo(jobId) {
+  const ta = document.getElementById('cmt-' + jobId);
+  const comment = (ta?.value || '').trim();
+  if (!comment) { toast('請先輸入 comment'); return; }
+  let id_token = null;
+  try { id_token = liff.getIDToken(); } catch(_) {}
+  const res = await fetch(API + `/api/bmo/jobs/${jobId}/comment`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({comment, id_token}),
+  });
+  if (res.status === 403) { toast('未授權：只有你本人能派工'); return; }
+  if (!res.ok) { toast('送出失敗'); return; }
+  toast('已回傳給 BMO，將在同分支繼續 🤖');
+  loadClaude();
+}
+
 async function loadClaude() {
-  const [s, queue, cu, hjobs] = await Promise.all([api('/api/claude/status'), api('/api/claude/queue'), api('/api/claude/code-usage'), api('/api/hermes/jobs')]);
+  const [s, queue, cu, hjobs] = await Promise.all([api('/api/claude/status'), api('/api/claude/queue'), api('/api/claude/code-usage'), api('/api/bmo/jobs')]);
   const el = document.getElementById('claude-content');
   const isOk = !s.is_rate_limited;
   el.innerHTML = `

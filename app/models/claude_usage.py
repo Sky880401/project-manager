@@ -74,13 +74,16 @@ class ResumeQueue(Base):
     priority = Column(Integer, default=0)
 
 
-class HermesJob(Base):
-    """交給 bmo 上的 Hermes worker 用 Claude Code headless 執行的任務。"""
-    __tablename__ = "hermes_jobs"
+class BmoJob(Base):
+    """交給 bmo 上的 BMO worker 用 Claude Code headless 執行的任務。"""
+    __tablename__ = "bmo_jobs"
 
     id = Column(Integer, primary_key=True, index=True)
     prompt = Column(Text, nullable=False)          # 要執行的內容
     task_id = Column(Integer, nullable=True)        # 來源 tasks.id（選填）
+    parent_id = Column(Integer, nullable=True)      # 來源 job（review 迭代用）
+    branch = Column(String(200))                    # 執行所在的 git 分支
+    diff = Column(Text)                             # 該次變更的 git diff
     status = Column(String(20), default="queued")   # queued / running / done / error
     result = Column(Text)                            # 執行輸出
     error = Column(Text)                             # 錯誤訊息

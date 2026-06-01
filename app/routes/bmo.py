@@ -1,11 +1,16 @@
-"""Hermes：把任務派給 bmo 上的 worker，用 Claude Code headless 執行。
+"""BMO：把任務派給 bmo 上的 worker，用 Claude Code headless 執行。
 
 流程：
-  LIFF/LINE 建立 job(queued) → bmo worker 輪詢 /queued → claim(running)
-  → 跑 `claude -p` → complete(done/error) → LINE 推播通知。
+  LIFF/LINE 建立 job(queued) → BMO worker 輪詢 /queued → claim(running)
+  → 在獨立 git 分支跑 `claude -p` → complete(帶 branch/diff) → LINE 通知。
+
+Review 迴圈：
+  job 完成後 LIFF 顯示 diff，使用者對變更下 comment →
+  POST /jobs/{id}/comment 建立後續 job（沿用同一分支、parent_id 指回）→
+  worker 在同分支讀 comment 繼續修改。
 
 worker 專用端點（queued/claim/complete）需帶 X-Worker-Token，
-值為環境變數 HERMES_WORKER_TOKEN；未設定時不啟用驗證（僅供本機測試）。
+值為環境變數 BMO_WORKER_TOKEN；未設定時不啟用驗證（僅供本機測試）。
 """
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
@@ -17,17 +22,17 @@ import requests
 
 from pydantic import BaseModel
 from app.database import get_db
-from app.models.claude_usage import HermesJob
+from app.models.claude_usage import BmoJob
 from app.services.line_push import push_to_all
 
-router = APIRouter(prefix="/hermes", tags=["hermes"])
+router = APIRouter(prefix="/bmo", tags=["bmo"])
 logger = logging.getLogger(__name__)
 
-WORKER_TOKEN = os.getenv("HERMES_WORKER_TOKEN", "")
+WORKER_TOKEN = os.getenv("BMO_WORKER_TOKEN", "")
 # 只有這些 LINE userId 能派工（逗號分隔）；留空＝不限制（僅供測試）
-ALLOWED_USERS = [u.strip() for u in os.getenv("HERMES_ALLOWED_USERS", "").split(",") if u.strip()]
+ALLOWED_USERS = [u.strip() for u in os.getenv("BMO_ALLOWED_USERS", "").split(",") if u.strip()]
 # LINE Login channel id，用來驗證 LIFF 的 id_token（= LIFF_ID 的前綴數字）
-LINE_CHANNEL_ID = os.getenv("HERMES_LINE_CHANNEL_ID", "")
+LINE_CHANNEL_ID = os.getenv("BMO_LINE_CHANNEL_ID", "")
 
 
 def _verify_line_user(id_token: str | None) -> str | None:
@@ -58,20 +63,36 @@ def _require_worker(token: Optional[str]):
         raise HTTPException(status_code=401, detail="invalid worker token")
 
 
+def _check_user(id_token: Optional[str]):
+    if ALLOWED_USERS:
+        sub = _verify_line_user(id_token)
+        if sub not in ALLOWED_USERS:
+            raise HTTPException(status_code=403, detail="只有授權的 LINE 帳號能派工給 BMO")
+
+
 # --- Schemas ---
 class JobCreate(BaseModel):
     prompt: str
     task_id: Optional[int] = None
     id_token: Optional[str] = None
 
+class JobComment(BaseModel):
+    comment: str
+    id_token: Optional[str] = None
+
 class JobComplete(BaseModel):
     result: Optional[str] = None
     error: Optional[str] = None
+    branch: Optional[str] = None
+    diff: Optional[str] = None
 
 class JobOut(BaseModel):
     id: int
     prompt: str
     task_id: Optional[int] = None
+    parent_id: Optional[int] = None
+    branch: Optional[str] = None
+    diff: Optional[str] = None
     status: str
     result: Optional[str] = None
     error: Optional[str] = None
@@ -86,12 +107,32 @@ class JobOut(BaseModel):
 def create_job(data: JobCreate, db: Session = Depends(get_db)):
     if not data.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt is empty")
-    # 白名單：只有指定 LINE userId 能派工
-    if ALLOWED_USERS:
-        sub = _verify_line_user(data.id_token)
-        if sub not in ALLOWED_USERS:
-            raise HTTPException(status_code=403, detail="只有授權的 LINE 帳號能派工給 BMO")
-    job = HermesJob(prompt=data.prompt.strip(), task_id=data.task_id, status="queued")
+    _check_user(data.id_token)
+    job = BmoJob(prompt=data.prompt.strip(), task_id=data.task_id, status="queued")
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+@router.post("/jobs/{job_id}/comment", response_model=JobOut, status_code=201)
+def comment_job(job_id: int, data: JobComment, db: Session = Depends(get_db)):
+    """對某個已完成 job 的變更下 review comment，建立沿用同分支的後續 job。"""
+    if not data.comment.strip():
+        raise HTTPException(status_code=400, detail="comment is empty")
+    _check_user(data.id_token)
+    parent = db.query(BmoJob).filter(BmoJob.id == job_id).first()
+    if not parent:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    prompt = (
+        f"這是延續任務 #{parent.id} 的修改。你上一輪在分支 `{parent.branch}` 做的變更（diff）：\n"
+        f"```\n{(parent.diff or '(無)')[:6000]}\n```\n\n"
+        f"我對上述變更的 review comment：\n{data.comment.strip()}\n\n"
+        f"請閱讀我的 comment，判斷是否需要進一步修改；若需要就在同一分支上修改。"
+    )
+    job = BmoJob(prompt=prompt, task_id=parent.task_id, parent_id=parent.id,
+                 branch=parent.branch, status="queued")
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -100,20 +141,20 @@ def create_job(data: JobCreate, db: Session = Depends(get_db)):
 
 @router.get("/jobs", response_model=List[JobOut])
 def list_jobs(limit: int = 20, db: Session = Depends(get_db)):
-    return db.query(HermesJob).order_by(HermesJob.id.desc()).limit(limit).all()
+    return db.query(BmoJob).order_by(BmoJob.id.desc()).limit(limit).all()
 
 
 # --- worker 專用 ---
 @router.get("/jobs/queued", response_model=List[JobOut])
 def queued_jobs(x_worker_token: Optional[str] = Header(None), db: Session = Depends(get_db)):
     _require_worker(x_worker_token)
-    return db.query(HermesJob).filter(HermesJob.status == "queued").order_by(HermesJob.id.asc()).all()
+    return db.query(BmoJob).filter(BmoJob.status == "queued").order_by(BmoJob.id.asc()).all()
 
 
 @router.post("/jobs/{job_id}/claim", response_model=JobOut)
 def claim_job(job_id: int, x_worker_token: Optional[str] = Header(None), db: Session = Depends(get_db)):
     _require_worker(x_worker_token)
-    job = db.query(HermesJob).filter(HermesJob.id == job_id).first()
+    job = db.query(BmoJob).filter(BmoJob.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
     if job.status != "queued":
@@ -129,12 +170,16 @@ def claim_job(job_id: int, x_worker_token: Optional[str] = Header(None), db: Ses
 def complete_job(job_id: int, data: JobComplete,
                  x_worker_token: Optional[str] = Header(None), db: Session = Depends(get_db)):
     _require_worker(x_worker_token)
-    job = db.query(HermesJob).filter(HermesJob.id == job_id).first()
+    job = db.query(BmoJob).filter(BmoJob.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
     job.status = "error" if data.error else "done"
     job.result = data.result
     job.error = data.error
+    if data.branch:
+        job.branch = data.branch
+    if data.diff is not None:
+        job.diff = data.diff
     job.finished_at = _now()
     db.commit()
     db.refresh(job)
