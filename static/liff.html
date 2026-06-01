@@ -147,8 +147,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 
 /* Drag to reorder */
 .proj-head { display: flex; align-items: flex-start; gap: 8px; }
-.drag-handle { font-size: 18px; color: var(--muted); cursor: grab; touch-action: none; padding: 0 2px; line-height: 1.2; flex: 0 0 auto; user-select: none; }
+.drag-handle { font-size: 18px; color: var(--muted); cursor: grab; touch-action: none; padding: 0 2px; line-height: 1.2; flex: 0 0 auto; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .project-card.dragging { opacity: 0.6; outline: 2px dashed var(--line); }
+/* 拖曳期間禁止整頁文字反白／iOS 複製選單 */
+body.no-select, body.no-select * { -webkit-user-select: none !important; user-select: none !important; -webkit-touch-callout: none !important; }
 
 /* Claude Code usage */
 .usage-card { background: var(--surface); border-radius: var(--radius); padding: 18px 16px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
@@ -476,6 +478,8 @@ function startDrag(e, id) {
   dragEl = document.getElementById('proj-' + id);
   if (!dragEl) return;
   dragEl.classList.add('dragging');
+  document.body.classList.add('no-select');
+  if (window.getSelection) { try { window.getSelection().removeAllRanges(); } catch(_){} }
   document.addEventListener('pointermove', onDragMove);
   document.addEventListener('pointerup', onDragUp, {once:true});
 }
@@ -494,6 +498,7 @@ function onDragMove(e) {
 }
 async function onDragUp() {
   document.removeEventListener('pointermove', onDragMove);
+  document.body.classList.remove('no-select');
   if (dragEl) dragEl.classList.remove('dragging');
   dragEl = null;
   const ids = [...document.getElementById('projects-list').querySelectorAll('.project-card')].map(c => +c.dataset.id);
