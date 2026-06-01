@@ -18,7 +18,7 @@ os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
 logger = logging.getLogger(__name__)
 
 from app.database import get_db, SessionLocal
-from app.models.project import Project, Task, Milestone
+from app.models.project import Project, Task, Milestone, TaskPriority
 from app.models.claude_usage import LineUser
 from app.models.conversation import Conversation
 from app.services.claude_monitor import get_claude_status
@@ -30,6 +30,10 @@ router = APIRouter(prefix="/line", tags=["line"])
 
 CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET", "")
 CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+
+# 儀表板 LIFF 連結（可用 LIFF_ID 覆寫，否則用既有預設）
+LIFF_ID = os.getenv("LIFF_ID", "2010243777-kq9FJSJT")
+DASHBOARD_URL = f"https://liff.line.me/{LIFF_ID}"
 
 handler = WebhookHandler(CHANNEL_SECRET)
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
@@ -91,6 +95,8 @@ def on_message(event):
             reply(event.reply_token, claude_status_text(db))
         elif text in ["待辦", "todo", "tasks"]:
             reply(event.reply_token, todo_text(db))
+        elif text in ["紅燈", "紅燈任務", "red", "🔴 紅燈任務"]:
+            reply(event.reply_token, red_tasks_message(db))
         elif text in ["儀表板", "dashboard", "liff"]:
             reply(event.reply_token, dashboard_message())
         elif text in ["用量", "usage", "code用量", "code", "額度"]:
@@ -230,6 +236,7 @@ def help_text():
         "📋 快捷指令：\n\n"
         "專案 — 查看所有專案\n"
         "待辦 — 查看未完成任務\n"
+        "紅燈任務 — 查看高優先未完成任務\n"
         "狀態 — 查看 Claude 使用狀況\n"
         "儀表板 — 開啟視覺化介面\n"
         "新增專案 名稱 — 建立新專案\n"
@@ -267,7 +274,7 @@ def dashboard_message():
                     "action": {
                         "type": "uri",
                         "label": "開啟儀表板",
-                        "uri": f"https://liff.line.me/2010243777-kq9FJSJT"
+                        "uri": DASHBOARD_URL
                     }
                 }]
             }
@@ -407,6 +414,58 @@ def todo_text(db: Session):
         lines.append(f"{icon} {pname}{t.title}")
 
     return TextMessage(text="\n".join(lines))
+
+
+def red_tasks_message(db: Session):
+    """🔴 紅燈任務：高優先（high）且未完成，依建立時間早→晚。
+    末端附上一鍵開啟儀表板按鈕，避免被聊天記錄洗掉後找不到入口。"""
+    tasks = (
+        db.query(Task)
+        .filter(
+            Task.deleted_at.is_(None),
+            Task.priority == TaskPriority.high,
+            Task.status != "completed",
+        )
+        .order_by(Task.created_at.asc())
+        .all()
+    )
+
+    header = {
+        "type": "box", "layout": "horizontal", "contents": [
+            {"type": "text", "text": "🔴 紅燈任務", "weight": "bold", "size": "lg", "color": "#e53935", "flex": 1},
+            {"type": "text", "text": f"{len(tasks)} 個", "size": "sm", "color": "#6a737d", "align": "end", "gravity": "center"},
+        ]
+    }
+
+    if not tasks:
+        body_contents = [header, {"type": "text", "text": "目前沒有紅燈任務 🎉", "size": "sm", "color": "#6a737d", "margin": "md", "wrap": True}]
+    else:
+        rows = []
+        for t in tasks[:20]:
+            project = db.query(Project).filter(Project.id == t.project_id).first()
+            pname = project.name if project else "未分類"
+            status_icon = "▶" if t.status == "in_progress" else "○"
+            rows.append({
+                "type": "box", "layout": "vertical", "spacing": "xs", "margin": "md", "contents": [
+                    {"type": "text", "text": f"{status_icon} {t.title}", "size": "sm", "weight": "bold", "wrap": True},
+                    {"type": "text", "text": f"[{pname}]", "size": "xs", "color": "#6a737d", "wrap": True},
+                ]
+            })
+        body_contents = [header, {"type": "separator", "margin": "md"}, *rows]
+
+    return FlexMessage(
+        alt_text=f"🔴 紅燈任務（{len(tasks)} 個）",
+        contents=FlexContainer.from_dict({
+            "type": "bubble",
+            "body": {"type": "box", "layout": "vertical", "spacing": "sm", "contents": body_contents},
+            "footer": {
+                "type": "box", "layout": "vertical", "contents": [{
+                    "type": "button", "style": "primary", "color": "#06C755",
+                    "action": {"type": "uri", "label": "開啟儀表板", "uri": DASHBOARD_URL},
+                }]
+            }
+        })
+    )
 
 
 def create_project(db: Session, name: str, reply_token: str):
