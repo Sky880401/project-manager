@@ -449,7 +449,7 @@ async function loadProjects() {
     return `
     <div class="project-card" id="proj-${p.id}" data-id="${p.id}">
       <div class="proj-head">
-        <div class="drag-handle" onpointerdown="startDrag(event, ${p.id})" title="拖拉排序">⠿</div>
+        <div class="drag-handle" onpointerdown="startDrag(event, ${p.id})" ontouchstart="event.preventDefault()" title="拖拉排序">⠿</div>
         <div style="flex:1;min-width:0">
           <div class="project-name">${esc(p.name)}</div>
           <div class="project-desc">${esc(p.description||'')}</div>
