@@ -91,3 +91,4 @@ class BmoJob(Base):
     started_at = Column(DateTime(timezone=True))
     finished_at = Column(DateTime(timezone=True))
     notified = Column(Boolean, default=False)
+    archived = Column(Boolean, default=False)        # 使用者標注完成後隱藏

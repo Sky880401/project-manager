@@ -193,6 +193,7 @@ body.no-select, body.no-select * { -webkit-user-select: none !important; user-se
     <div class="tab active" onclick="switchTab('dashboard')">儀表板</div>
     <div class="tab" onclick="switchTab('projects')">專案</div>
     <div class="tab" onclick="switchTab('tasks')">待辦</div>
+    <div class="tab" onclick="switchTab('bmo')">BMO</div>
     <div class="tab" onclick="switchTab('claude')">Claude</div>
   </div>
 </div>
@@ -207,6 +208,10 @@ body.no-select, body.no-select * { -webkit-user-select: none !important; user-se
 
 <div id="page-tasks" class="page">
   <div id="tasks-list"><div class="loading">載入中…</div></div>
+</div>
+
+<div id="page-bmo" class="page">
+  <div id="bmo-content"><div class="loading">載入中…</div></div>
 </div>
 
 <div id="page-claude" class="page">
@@ -614,8 +619,7 @@ async function dispatchBmo(projectId, taskId) {
   if (!res.ok) { toast('派工失敗'); return; }
   closeSheetForce();
   toast('已派給 BMO 執行 🤖');
-  switchTab('claude');
-  loadClaude();
+  switchTab('bmo');
 }
 async function saveTask(projectId, taskId) {
   const title = document.getElementById('et-title').value.trim();
@@ -777,26 +781,50 @@ function renderCodeUsage(cu) {
   </div>`;
 }
 
-function renderBmo(jobs) {
-  if (!jobs || !jobs.length) return '';
+async function loadBmo() {
+  const el = document.getElementById('bmo-content');
+  const jobs = await api('/api/bmo/jobs');
+  if (!jobs || !jobs.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">🤖</div><p>目前沒有派給 BMO 的任務</p></div>';
+    return;
+  }
   const badge = {queued:'⏳ 排隊中',running:'⚙️ 執行中',done:'✅ 完成',error:'⚠️ 失敗'};
-  return `
-    <div class="section-title">🤖 BMO 任務</div>
-    ${jobs.slice(0,8).map(j => `
-      <div class="queue-card">
-        <div class="queue-desc">#${j.id} ${esc((j.prompt||'').split('\\n')[0])}${j.parent_id?` <span style="color:var(--muted);font-weight:400">(延續 #${j.parent_id})</span>`:''}</div>
-        <div class="queue-ckpt">${badge[j.status]||j.status}${j.branch?` · 🌿 ${esc(j.branch)}`:''}</div>
-        ${j.status==='done' && j.result ? `<div class="task-desc" style="max-height:120px;overflow:auto">${esc(j.result)}</div>` : ''}
-        ${j.status==='error' && j.error ? `<div class="task-desc" style="color:var(--red)">${esc(j.error)}</div>` : ''}
+  el.innerHTML = jobs.slice(0,20).map(j => {
+    const hasFeedback = (j.status==='done' && (j.result || j.diff)) || (j.status==='error' && j.error);
+    // 反饋內容預設收起，點 summary 才展開
+    const feedback = hasFeedback ? `
+      <details style="margin-top:8px">
+        <summary style="font-size:12px;color:var(--blue);cursor:pointer;font-weight:600">查看 BMO 反饋</summary>
+        ${j.result ? `<div class="task-desc" style="max-height:160px;overflow:auto;margin-top:8px">${esc(j.result)}</div>` : ''}
+        ${j.status==='error' && j.error ? `<div class="task-desc" style="color:var(--red);margin-top:8px">${esc(j.error)}</div>` : ''}
+        ${j.diff ? `<pre style="background:#0d1117;color:#c9d1d9;font-size:11px;padding:10px;border-radius:8px;overflow:auto;max-height:240px;margin-top:8px;white-space:pre">${esc(j.diff)}</pre>` : ''}
         ${j.status==='done' && j.diff ? `
-          <details style="margin-top:8px">
-            <summary style="font-size:12px;color:var(--blue);cursor:pointer">查看變更 diff</summary>
-            <pre style="background:#0d1117;color:#c9d1d9;font-size:11px;padding:10px;border-radius:8px;overflow:auto;max-height:240px;margin-top:6px;white-space:pre">${esc(j.diff)}</pre>
-          </details>
           <textarea id="cmt-${j.id}" placeholder="對這次變更下 comment，回傳給 BMO 判斷下一步…" rows="2" style="width:100%;margin-top:8px;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;resize:vertical;font-family:inherit"></textarea>
           <button class="queue-btn resume" style="margin-top:6px;width:100%" onclick="commentBmo(${j.id})">💬 回傳 comment 給 BMO</button>
         ` : ''}
-      </div>`).join('')}`;
+      </details>` : '';
+    return `
+      <div class="queue-card">
+        <div class="queue-desc">#${j.id} ${esc((j.prompt||'').split('\\n')[0])}${j.parent_id?` <span style="color:var(--muted);font-weight:400">(延續 #${j.parent_id})</span>`:''}</div>
+        <div class="queue-ckpt">${badge[j.status]||j.status}${j.branch?` · 🌿 ${esc(j.branch)}`:''}</div>
+        ${feedback}
+        <button class="queue-btn cancel" style="margin-top:8px;width:100%" onclick="archiveBmo(${j.id})">✅ 標注完成並隱藏</button>
+      </div>`;
+  }).join('') + `<button onclick="loadBmo()" style="width:100%;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;font-size:13px;cursor:pointer;margin-top:8px">重新整理</button>`;
+}
+
+async function archiveBmo(jobId) {
+  let id_token = null;
+  try { id_token = liff.getIDToken(); } catch(_) {}
+  const res = await fetch(API + `/api/bmo/jobs/${jobId}/archive`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({id_token}),
+  });
+  if (!res.ok) { toast('操作失敗'); return; }
+  toast('已標注完成，已從待辦與 BMO 隱藏 ✅');
+  loadBmo();
+  loadTasks();
+  loadDashboard();
 }
 
 async function commentBmo(jobId) {
@@ -812,11 +840,11 @@ async function commentBmo(jobId) {
   if (res.status === 403) { toast('未授權：只有你本人能派工'); return; }
   if (!res.ok) { toast('送出失敗'); return; }
   toast('已回傳給 BMO，將在同分支繼續 🤖');
-  loadClaude();
+  loadBmo();
 }
 
 async function loadClaude() {
-  const [s, queue, cu, hjobs] = await Promise.all([api('/api/claude/status'), api('/api/claude/queue'), api('/api/claude/code-usage'), api('/api/bmo/jobs')]);
+  const [s, queue, cu] = await Promise.all([api('/api/claude/status'), api('/api/claude/queue'), api('/api/claude/code-usage')]);
   const el = document.getElementById('claude-content');
   const isOk = !s.is_rate_limited;
   el.innerHTML = `
@@ -832,7 +860,6 @@ async function loadClaude() {
       ${s.is_rate_limited ? `<button class="resolve-btn" onclick="resolveRateLimit()">手動解除限速</button>` : ''}
     </div>
     ${renderCodeUsage(cu)}
-    ${renderBmo(hjobs)}
     ${queue.length ? `
     <div class="section-title">待續接任務</div>
     ${queue.map(q => `
@@ -931,10 +958,11 @@ function switchTab(tab) {
   if (selectMode) exitSelectMode();
   currentTab = tab;
   document.querySelectorAll('.tab').forEach((el,i) => {
-    el.classList.toggle('active', ['dashboard','projects','tasks','claude'][i]===tab);
+    el.classList.toggle('active', ['dashboard','projects','tasks','bmo','claude'][i]===tab);
   });
   document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
   document.getElementById(`page-${tab}`).classList.add('active');
+  if (tab === 'bmo') loadBmo();
 }
 
 // 優先度排序：紅(high)最上，同優先依建立時間早→晚

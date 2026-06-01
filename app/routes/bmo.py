@@ -80,6 +80,9 @@ class JobComment(BaseModel):
     comment: str
     id_token: Optional[str] = None
 
+class JobArchive(BaseModel):
+    id_token: Optional[str] = None
+
 class JobComplete(BaseModel):
     result: Optional[str] = None
     error: Optional[str] = None
@@ -94,6 +97,7 @@ class JobOut(BaseModel):
     branch: Optional[str] = None
     diff: Optional[str] = None
     status: str
+    archived: bool = False
     result: Optional[str] = None
     error: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -140,8 +144,32 @@ def comment_job(job_id: int, data: JobComment, db: Session = Depends(get_db)):
 
 
 @router.get("/jobs", response_model=List[JobOut])
-def list_jobs(limit: int = 20, db: Session = Depends(get_db)):
-    return db.query(BmoJob).order_by(BmoJob.id.desc()).limit(limit).all()
+def list_jobs(limit: int = 20, include_archived: bool = False, db: Session = Depends(get_db)):
+    q = db.query(BmoJob)
+    if not include_archived:
+        q = q.filter(BmoJob.archived == False)  # noqa: E712
+    return q.order_by(BmoJob.id.desc()).limit(limit).all()
+
+
+@router.post("/jobs/{job_id}/archive", response_model=JobOut)
+def archive_job(job_id: int, data: JobArchive | None = None, db: Session = Depends(get_db)):
+    """使用者標注完成：隱藏此 job，並把來源任務標記為 completed（從待辦移除）。"""
+    if data is not None:
+        _check_user(data.id_token)
+    job = db.query(BmoJob).filter(BmoJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    job.archived = True
+    # 連帶把來源任務標記完成，讓它從待辦消失
+    if job.task_id:
+        from app.models.project import Task, TaskStatus
+        task = db.query(Task).filter(Task.id == job.task_id,
+                                     Task.deleted_at.is_(None)).first()
+        if task:
+            task.status = TaskStatus.completed
+    db.commit()
+    db.refresh(job)
+    return job
 
 
 # --- worker 專用 ---
