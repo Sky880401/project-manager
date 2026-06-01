@@ -798,16 +798,18 @@ async function loadBmo() {
         ${j.result ? `<div class="task-desc" style="max-height:160px;overflow:auto;margin-top:8px">${esc(j.result)}</div>` : ''}
         ${j.status==='error' && j.error ? `<div class="task-desc" style="color:var(--red);margin-top:8px">${esc(j.error)}</div>` : ''}
         ${j.diff ? `<pre style="background:#0d1117;color:#c9d1d9;font-size:11px;padding:10px;border-radius:8px;overflow:auto;max-height:240px;margin-top:8px;white-space:pre">${esc(j.diff)}</pre>` : ''}
-        ${j.status==='done' && j.diff ? `
-          <textarea id="cmt-${j.id}" placeholder="對這次變更下 comment，回傳給 BMO 判斷下一步…" rows="2" style="width:100%;margin-top:8px;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;resize:vertical;font-family:inherit"></textarea>
-          <button class="queue-btn resume" style="margin-top:6px;width:100%" onclick="commentBmo(${j.id})">💬 回傳 comment 給 BMO</button>
-        ` : ''}
       </details>` : '';
+    // comment 框維持常駐顯示（不收進 details），任務完成且有 diff 時才出現
+    const commentBox = (j.status==='done' && j.diff) ? `
+      <textarea id="cmt-${j.id}" placeholder="對這次變更下 comment，回傳給 BMO 判斷下一步…" rows="2" style="width:100%;margin-top:8px;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;resize:vertical;font-family:inherit"></textarea>
+      <button class="queue-btn resume" style="margin-top:6px;width:100%" onclick="commentBmo(${j.id})">💬 回傳 comment 給 BMO</button>
+    ` : '';
     return `
       <div class="queue-card">
         <div class="queue-desc">#${j.id} ${esc((j.prompt||'').split('\\n')[0])}${j.parent_id?` <span style="color:var(--muted);font-weight:400">(延續 #${j.parent_id})</span>`:''}</div>
         <div class="queue-ckpt">${badge[j.status]||j.status}${j.branch?` · 🌿 ${esc(j.branch)}`:''}</div>
         ${feedback}
+        ${commentBox}
         ${j.status==='done' && j.branch && j.kind!=='deploy' ? `<button class="queue-btn resume" style="margin-top:8px;width:100%;background:#5b4ee5" onclick="deployBmo(${j.id})">🚀 合併並上線</button>` : ''}
         <button class="queue-btn cancel" style="margin-top:8px;width:100%" onclick="archiveBmo(${j.id})">✅ 標注完成並隱藏</button>
       </div>`;
