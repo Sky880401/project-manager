@@ -126,6 +126,25 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .dash-stat-val { font-size: 20px; font-weight: 800; }
 .dash-stat-label { font-size: 10px; color: var(--muted); margin-top: 2px; }
 
+/* Kebab menu */
+.header-actions { display: flex; align-items: center; gap: 10px; }
+.menu-btn { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 22px; color: #fff; cursor: pointer; border-radius: 50%; }
+.menu-btn:active { background: rgba(255,255,255,0.2); }
+.menu { position: absolute; top: 52px; right: 12px; background: var(--surface); border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.18); overflow: hidden; z-index: 300; min-width: 160px; }
+.menu-item { padding: 13px 16px; font-size: 14px; color: var(--text); cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.menu-item:active { background: var(--bg); }
+
+/* Select / multi-delete mode */
+.select-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--surface); border-top: 1px solid var(--border); display: flex; align-items: center; gap: 12px; padding: 12px 16px 24px; z-index: 250; }
+.select-bar .sb-cancel { background: var(--bg); color: var(--text); border: none; border-radius: 10px; padding: 12px 16px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.select-bar .sb-count { flex: 1; text-align: center; font-size: 13px; color: var(--muted); }
+.select-bar .sb-del { background: var(--red); color: #fff; border: none; border-radius: 10px; padding: 12px 18px; font-size: 14px; font-weight: 700; cursor: pointer; }
+.sel-check { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border); flex: 0 0 auto; display: flex; align-items: center; justify-content: center; font-size: 13px; color: #fff; }
+.checked .sel-check { background: var(--red); border-color: var(--red); }
+.project-card.selectable, .task-card.selectable { cursor: pointer; display: flex; align-items: center; gap: 12px; }
+.project-card.checked, .task-card.checked { outline: 2px solid var(--red); }
+.icon-btn { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; width: 40px; padding: 8px 0; font-size: 14px; cursor: pointer; }
+
 /* Claude Code usage */
 .usage-card { background: var(--surface); border-radius: var(--radius); padding: 18px 16px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
 .usage-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
@@ -158,7 +177,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 <div class="header">
   <div class="header-top">
     <h1>Project Manager</h1>
-    <img class="avatar" id="avatar" src="" alt="">
+    <div class="header-actions">
+      <div class="menu-btn" onclick="toggleMenu(event)">⋮</div>
+      <img class="avatar" id="avatar" src="" alt="">
+    </div>
   </div>
   <div class="tabs">
     <div class="tab active" onclick="switchTab('dashboard')">儀表板</div>
@@ -184,6 +206,16 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   <div id="claude-content"><div class="loading">載入中…</div></div>
 </div>
 
+<div id="menu" class="menu" style="display:none">
+  <div class="menu-item" onclick="enterSelectMode()">🗑 選擇刪除</div>
+</div>
+
+<div id="select-bar" class="select-bar" style="display:none">
+  <button class="sb-cancel" onclick="exitSelectMode()">取消</button>
+  <span class="sb-count" id="select-count">已選 0</span>
+  <button class="sb-del" onclick="deleteSelected()">刪除</button>
+</div>
+
 <button class="fab" id="fab" onclick="showFab()">＋</button>
 
 <div class="overlay" id="overlay" style="display:none" onclick="closeSheet(event)">
@@ -196,6 +228,69 @@ const LIFF_ID = '2010243777-kq9FJSJT';
 let currentTab = 'dashboard';
 let lineProfile = null;
 let currentProjectName = '';
+let selectMode = null;            // null | 'projects' | 'tasks'
+let selected = new Map();         // token -> meta（要刪除的項目）
+
+// === Kebab 選單 ===
+function toggleMenu(e) {
+  e.stopPropagation();
+  const m = document.getElementById('menu');
+  m.style.display = m.style.display === 'none' ? 'block' : 'none';
+}
+function hideMenu() { document.getElementById('menu').style.display = 'none'; }
+document.addEventListener('click', hideMenu);
+
+// === 多選刪除模式 ===
+function enterSelectMode() {
+  hideMenu();
+  if (currentTab !== 'projects' && currentTab !== 'tasks') {
+    toast('請切到「專案」或「待辦」頁再選擇刪除');
+    return;
+  }
+  selectMode = currentTab;
+  selected.clear();
+  document.getElementById('select-bar').style.display = 'flex';
+  document.getElementById('fab').style.display = 'none';
+  rerenderCurrent();
+  updateSelectCount();
+}
+function exitSelectMode() {
+  selectMode = null;
+  selected.clear();
+  document.getElementById('select-bar').style.display = 'none';
+  document.getElementById('fab').style.display = 'flex';
+  rerenderCurrent();
+}
+function rerenderCurrent() {
+  if (currentTab === 'projects') loadProjects();
+  else if (currentTab === 'tasks') loadTasks();
+}
+function toggleSelect(type, a, b) {
+  const id = type === 'task' ? b : a;
+  const token = type + '-' + id;
+  if (selected.has(token)) selected.delete(token);
+  else selected.set(token, type === 'task' ? {type, projectId: a, id: b} : {type, id: a});
+  const el = document.getElementById('sel-' + token);
+  if (el) el.classList.toggle('checked', selected.has(token));
+  updateSelectCount();
+}
+function updateSelectCount() {
+  const what = selectMode === 'projects' ? '專案' : '任務';
+  document.getElementById('select-count').textContent = `已選 ${selected.size} 個${what}`;
+}
+async function deleteSelected() {
+  if (!selected.size) { toast('尚未選取任何項目'); return; }
+  const items = [...selected.values()];
+  const what = selectMode === 'projects' ? '專案' : '任務';
+  if (!confirm(`確定刪除 ${items.length} 個${what}？\n（可在垃圾桶還原）`)) return;
+  for (const it of items) {
+    if (it.type === 'project') await api(`/api/projects/${it.id}`, {method:'DELETE'});
+    else await api(`/api/projects/${it.projectId}/tasks/${it.id}`, {method:'DELETE'});
+  }
+  toast(`已刪除 ${items.length} 個${what}`);
+  exitSelectMode();
+  loadAll();
+}
 
 async function init() {
   try {
@@ -334,6 +429,16 @@ async function loadProjects() {
     const done = tasks.filter(t => t.status === 'completed').length;
     const pct = tasks.length ? Math.round(done/tasks.length*100) : 0;
     const statusLabel = {active:'進行中',paused:'暫停',completed:'已完成',archived:'封存'}[p.status]||p.status;
+    if (selectMode === 'projects') {
+      return `
+      <div class="project-card selectable" id="sel-project-${p.id}" onclick="toggleSelect('project',${p.id})">
+        <div class="sel-check">✓</div>
+        <div style="flex:1;min-width:0">
+          <div class="project-name">${esc(p.name)}</div>
+          <div class="project-desc" style="margin:0">${esc(p.description||'')}</div>
+        </div>
+      </div>`;
+    }
     return `
     <div class="project-card">
       <div class="project-name">${esc(p.name)}</div>
@@ -347,10 +452,30 @@ async function loadProjects() {
       </div>
       <div style="display:flex;gap:8px;margin-top:12px">
         <button class="project-card-btn" style="flex:1;margin-top:0" onclick="showProjectDetail(${p.id},'${esc(p.name)}')">查看詳情</button>
-        <button class="project-card-btn" style="flex:0 0 auto;margin-top:0;background:var(--red);width:48px" onclick="deleteProject(${p.id},'${esc(p.name)}')">🗑</button>
+        <button class="icon-btn" onclick="showEditProject(${p.id})" title="編輯">✏️</button>
       </div>
     </div>`;
   }).join('');
+}
+
+async function showEditProject(id) {
+  const p = await api(`/api/projects/${id}`);
+  showSheet(`
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">編輯專案</div>
+    <div class="field"><label>專案名稱</label><input id="e-name" value="${esc(p.name)}"></div>
+    <div class="field"><label>說明（選填）</label><input id="e-desc" value="${esc(p.description||'')}"></div>
+    <button class="sheet-btn" onclick="saveProject(${id})">儲存</button>
+  `);
+}
+async function saveProject(id) {
+  const name = document.getElementById('e-name').value.trim();
+  if (!name) return;
+  await api(`/api/projects/${id}`, {method:'PATCH', body:{name, description: document.getElementById('e-desc').value}});
+  closeSheetForce();
+  toast('專案已更新');
+  loadProjects();
+  loadDashboard();
 }
 
 async function deleteProject(id, name) {
@@ -402,12 +527,39 @@ function taskHTML(t, projectId) {
   return `
   <div class="task-card" id="t-${t.id}">
     <div class="task-check ${checkClass}" onclick="cycleTask(${projectId},${t.id},'${t.status}')">${checkIcon}</div>
-    <div style="flex:1;min-width:0">
+    <div style="flex:1;min-width:0" onclick="showEditTask(${projectId},${t.id})">
       <div class="task-title ${isDone?'done':''}">${esc(t.title)}</div>
       ${t.description ? `<div class="task-desc">${esc(t.description)}</div>` : ''}
     </div>
     <div class="task-prio ${prio}" title="${prioTitle}" onclick="cyclePriority(${projectId},${t.id},'${prio}')"></div>
   </div>`;
+}
+
+async function showEditTask(projectId, taskId) {
+  const p = await api(`/api/projects/${projectId}`);
+  const t = (p.tasks||[]).find(x => x.id === taskId);
+  if (!t) return;
+  showSheet(`
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">編輯任務</div>
+    <div class="field"><label>標題</label><input id="et-title" value="${esc(t.title)}"></div>
+    <div class="field"><label>描述（選填）</label>
+      <textarea id="et-desc" rows="3" style="resize:vertical;font-family:inherit">${esc(t.description||'')}</textarea>
+    </div>
+    <button class="sheet-btn" onclick="saveTask(${projectId},${taskId})">儲存</button>
+  `);
+}
+async function saveTask(projectId, taskId) {
+  const title = document.getElementById('et-title').value.trim();
+  if (!title) return;
+  await api(`/api/projects/${projectId}/tasks/${taskId}`, {method:'PATCH', body:{
+    title, description: document.getElementById('et-desc').value
+  }});
+  closeSheetForce();
+  toast('任務已更新');
+  loadTasks();
+  loadProjects();
+  loadDashboard();
 }
 
 async function cyclePriority(projectId, taskId, current) {
@@ -475,30 +627,37 @@ async function loadTasks() {
     el.innerHTML = '<div class="empty"><div class="icon">✅</div><p>沒有待辦任務！</p></div>';
     return;
   }
+  const row = (t, statusCur, icon, checkExtra) => {
+    if (selectMode === 'tasks') {
+      return `
+      <div class="task-card selectable" id="sel-task-${t.id}" onclick="toggleSelect('task',${t.projectId},${t.id})">
+        <div class="sel-check">✓</div>
+        <div style="flex:1;min-width:0">
+          <div class="task-title">${esc(t.title)}</div>
+          <div class="task-project">${esc(t.projectName)}</div>
+          ${t.description ? `<div class="task-desc">${esc(t.description)}</div>` : ''}
+        </div>
+      </div>`;
+    }
+    return `
+      <div class="task-card">
+        <div class="task-check ${checkExtra}" onclick="cycleTask(${t.projectId},${t.id},'${statusCur}')">${icon}</div>
+        <div style="flex:1;min-width:0" onclick="showEditTask(${t.projectId},${t.id})">
+          <div class="task-title">${esc(t.title)}</div>
+          <div class="task-project">${esc(t.projectName)}</div>
+          ${t.description ? `<div class="task-desc">${esc(t.description)}</div>` : ''}
+        </div>
+        <div class="task-prio ${t.priority||'medium'}" onclick="cyclePriority(${t.projectId},${t.id},'${t.priority||'medium'}')"></div>
+      </div>`;
+  };
   let html = '';
   if (inprog.length) {
     html += '<div class="section-title">進行中</div>';
-    html += sortTasks(inprog).map(t => `
-      <div class="task-card">
-        <div class="task-check progress" onclick="cycleTask(${t.projectId},${t.id},'in_progress')">▶</div>
-        <div style="flex:1">
-          <div class="task-title">${esc(t.title)}</div>
-          <div class="task-project">${esc(t.projectName)}</div>
-        </div>
-        <div class="task-prio ${t.priority||'medium'}" onclick="cyclePriority(${t.projectId},${t.id},'${t.priority||'medium'}')"></div>
-      </div>`).join('');
+    html += sortTasks(inprog).map(t => row(t, 'in_progress', '▶', 'progress')).join('');
   }
   if (todo.length) {
     html += '<div class="section-title">待做</div>';
-    html += sortTasks(todo).slice(0,15).map(t => `
-      <div class="task-card">
-        <div class="task-check" onclick="cycleTask(${t.projectId},${t.id},'todo')"></div>
-        <div style="flex:1">
-          <div class="task-title">${esc(t.title)}</div>
-          <div class="task-project">${esc(t.projectName)}</div>
-        </div>
-        <div class="task-prio ${t.priority||'medium'}" onclick="cyclePriority(${t.projectId},${t.id},'${t.priority||'medium'}')"></div>
-      </div>`).join('');
+    html += sortTasks(todo).slice(0,15).map(t => row(t, 'todo', '', '')).join('');
   }
   el.innerHTML = html;
 }
@@ -662,6 +821,7 @@ function closeSheet(e) { if (e.target===document.getElementById('overlay')) clos
 function closeSheetForce() { document.getElementById('overlay').style.display='none'; }
 
 function switchTab(tab) {
+  if (selectMode) exitSelectMode();
   currentTab = tab;
   document.querySelectorAll('.tab').forEach((el,i) => {
     el.classList.toggle('active', ['dashboard','projects','tasks','claude'][i]===tab);
