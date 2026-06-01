@@ -80,6 +80,7 @@ class BmoJob(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     prompt = Column(Text, nullable=False)          # 要執行的內容
+    kind = Column(String(20), default="task")       # task（跑 claude） / deploy（合併部署）
     task_id = Column(Integer, nullable=True)        # 來源 tasks.id（選填）
     parent_id = Column(Integer, nullable=True)      # 來源 job（review 迭代用）
     branch = Column(String(200))                    # 執行所在的 git 分支

@@ -808,9 +808,24 @@ async function loadBmo() {
         <div class="queue-desc">#${j.id} ${esc((j.prompt||'').split('\\n')[0])}${j.parent_id?` <span style="color:var(--muted);font-weight:400">(延續 #${j.parent_id})</span>`:''}</div>
         <div class="queue-ckpt">${badge[j.status]||j.status}${j.branch?` · 🌿 ${esc(j.branch)}`:''}</div>
         ${feedback}
+        ${j.status==='done' && j.branch && j.kind!=='deploy' ? `<button class="queue-btn resume" style="margin-top:8px;width:100%;background:#5b4ee5" onclick="deployBmo(${j.id})">🚀 合併並上線</button>` : ''}
         <button class="queue-btn cancel" style="margin-top:8px;width:100%" onclick="archiveBmo(${j.id})">✅ 標注完成並隱藏</button>
       </div>`;
   }).join('') + `<button onclick="loadBmo()" style="width:100%;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;font-size:13px;cursor:pointer;margin-top:8px">重新整理</button>`;
+}
+
+async function deployBmo(jobId) {
+  if (!confirm('確定要把這個分支合併進 main 並部署到正式站？')) return;
+  let id_token = null;
+  try { id_token = liff.getIDToken(); } catch(_) {}
+  const res = await fetch(API + `/api/bmo/jobs/${jobId}/deploy`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({id_token}),
+  });
+  if (res.status === 403) { toast('未授權：只有你本人能部署'); return; }
+  if (!res.ok) { toast('送出失敗'); return; }
+  toast('已排程合併+部署 🚀，完成會 LINE 通知');
+  loadBmo();
 }
 
 async function archiveBmo(jobId) {

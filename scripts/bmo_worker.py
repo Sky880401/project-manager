@@ -128,14 +128,62 @@ def run_job_on_branch(prompt: str, job_id: int, existing_branch: str | None):
     return (result or "") + info, None, branch, diff
 
 
+def deploy_branch(branch: str):
+    """把 branch 合併進 main、push，並 ssh 到 LXC 部署。回傳 (result, error, branch, None)。"""
+    if not is_git_repo():
+        return None, "workspace 不是 git repo", branch, None
+    try:
+        git("checkout", "main")
+        git("fetch", "origin")
+        try:
+            git("merge", "--ff-only", "origin/main")  # 先跟上遠端
+        except Exception:
+            pass
+    except Exception as e:
+        return None, f"切到 main 失敗：{e}", branch, None
+    # 合併分支
+    try:
+        git("merge", "--no-ff", "--no-edit", branch)
+    except Exception as e:
+        try:
+            git("merge", "--abort")
+        except Exception:
+            pass
+        return None, f"合併失敗（可能有衝突，已 abort）：{e}", branch, None
+    # push
+    p = subprocess.run(["git", "-C", WORKSPACE, "push", "origin", "main"], capture_output=True, text=True)
+    if p.returncode != 0:
+        return None, f"push 失敗：{(p.stderr or p.stdout)[:200]}", branch, None
+    # 部署到 LXC
+    deploy_cmd = ("cd ~/project-manager && git pull --ff-only && "
+                  "venv/bin/alembic upgrade head && systemctl restart project-manager && "
+                  "sleep 2 && systemctl is-active project-manager")
+    try:
+        p = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "lxc", deploy_cmd],
+                           capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        return None, "LXC 部署逾時", branch, None
+    if p.returncode != 0:
+        return None, f"LXC 部署失敗：{(p.stderr or p.stdout)[:300]}", branch, None
+    # 清掉本機已合併分支
+    try:
+        git("branch", "-d", branch)
+    except Exception:
+        pass
+    return f"🚀 已合併 `{branch}` 進 main 並部署上線\n{p.stdout.strip()[-200:]}", None, branch, None
+
+
 def process(job):
     jid = job["id"]
     r = requests.post(f"{API_BASE}/api/bmo/jobs/{jid}/claim", headers=HEADERS, timeout=15)
     if r.status_code != 200:
         log(f"claim #{jid} 失敗：{r.status_code} {r.text[:120]}")
         return
-    log(f"▶ 執行 #{jid}：{job['prompt'][:60]!r}")
-    result, error, branch, diff = run_job_on_branch(job["prompt"], jid, job.get("branch"))
+    log(f"▶ 執行 #{jid}（{job.get('kind','task')}）：{job['prompt'][:50]!r}")
+    if job.get("kind") == "deploy":
+        result, error, branch, diff = deploy_branch(job.get("branch"))
+    else:
+        result, error, branch, diff = run_job_on_branch(job["prompt"], jid, job.get("branch"))
     requests.post(f"{API_BASE}/api/bmo/jobs/{jid}/complete", headers=HEADERS,
                   json={"result": result, "error": error, "branch": branch, "diff": diff}, timeout=30)
     log(f"✓ 完成 #{jid}" + (f"（錯誤：{error[:60]}）" if error else f"（分支 {branch}）"))

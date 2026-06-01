@@ -89,9 +89,13 @@ class JobComplete(BaseModel):
     branch: Optional[str] = None
     diff: Optional[str] = None
 
+class JobDeploy(BaseModel):
+    id_token: Optional[str] = None
+
 class JobOut(BaseModel):
     id: int
     prompt: str
+    kind: str = "task"
     task_id: Optional[int] = None
     parent_id: Optional[int] = None
     branch: Optional[str] = None
@@ -137,6 +141,23 @@ def comment_job(job_id: int, data: JobComment, db: Session = Depends(get_db)):
     )
     job = BmoJob(prompt=prompt, task_id=parent.task_id, parent_id=parent.id,
                  branch=parent.branch, status="queued")
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+@router.post("/jobs/{job_id}/deploy", response_model=JobOut, status_code=201)
+def deploy_job(job_id: int, data: JobDeploy, db: Session = Depends(get_db)):
+    """一鍵合併+部署：建立一個 kind=deploy 的 job，worker 會把該分支合併進 main 並部署。"""
+    _check_user(data.id_token)
+    src = db.query(BmoJob).filter(BmoJob.id == job_id).first()
+    if not src:
+        raise HTTPException(status_code=404, detail="job not found")
+    if not src.branch:
+        raise HTTPException(status_code=400, detail="此任務沒有可部署的分支")
+    job = BmoJob(prompt=f"合併並部署分支 {src.branch}", kind="deploy",
+                 task_id=src.task_id, parent_id=src.id, branch=src.branch, status="queued")
     db.add(job)
     db.commit()
     db.refresh(job)
