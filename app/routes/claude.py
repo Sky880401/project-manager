@@ -2,6 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime, timezone, timedelta
+import os
+
+# 5 小時視窗 output token 預算（與 LINE 顯示一致，可用環境變數覆蓋）
+CODE_WINDOW_OUTPUT_BUDGET = int(os.getenv("CODE_WINDOW_OUTPUT_BUDGET", "500000"))
 
 from app.database import get_db
 from app.models.claude_usage import ClaudeSession, RateLimitEvent, ResumeQueue, CodeUsageReport
@@ -54,6 +58,14 @@ def get_code_usage(db: Session = Depends(get_db)):
     report = db.query(CodeUsageReport).order_by(CodeUsageReport.reported_at.desc()).first()
     if not report:
         return {"available": False}
+    used = report.window_5h_output or 0
+    usage_pct = min(100, int(used / CODE_WINDOW_OUTPUT_BUDGET * 100)) if CODE_WINDOW_OUTPUT_BUDGET else 0
+    # 視窗重置時間 = 視窗內最早訊息 + 5 小時
+    reset_at = None
+    if report.window_earliest:
+        e = report.window_earliest
+        e = e.replace(tzinfo=timezone.utc) if e.tzinfo is None else e
+        reset_at = (e + timedelta(hours=5)).isoformat()
     return {
         "available": True,
         "window_5h": {
@@ -63,6 +75,9 @@ def get_code_usage(db: Session = Depends(get_db)):
             "cache_write": report.window_5h_cache_write,
             "messages": report.window_5h_messages,
         },
+        "output_budget": CODE_WINDOW_OUTPUT_BUDGET,
+        "usage_pct": usage_pct,
+        "window_reset_at": reset_at,
         "today": {
             "input": report.today_input,
             "output": report.today_output,

@@ -125,6 +125,27 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .dash-stat-val { font-size: 20px; font-weight: 800; }
 .dash-stat-label { font-size: 10px; color: var(--muted); margin-top: 2px; }
 
+/* Claude Code usage */
+.usage-card { background: var(--surface); border-radius: var(--radius); padding: 18px 16px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+.usage-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+.usage-title { font-size: 13px; font-weight: 700; }
+.usage-model { font-size: 11px; color: var(--muted); }
+.usage-pct { font-size: 28px; font-weight: 800; line-height: 1; margin: 6px 0 2px; }
+.usage-bar { height: 10px; background: var(--bg); border-radius: 6px; overflow: hidden; margin: 8px 0 4px; }
+.usage-fill { height: 100%; border-radius: 6px; transition: width 0.4s; }
+.usage-reset { font-size: 11px; color: var(--muted); }
+.tok-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12px; }
+.tok-label { width: 64px; color: var(--muted); flex: 0 0 auto; }
+.tok-track { flex: 1; height: 6px; background: var(--bg); border-radius: 4px; overflow: hidden; }
+.tok-fill { height: 100%; background: var(--blue); border-radius: 4px; }
+.tok-val { width: 52px; text-align: right; font-weight: 600; flex: 0 0 auto; }
+
+/* Red-flag list */
+.redflag-card { background: var(--surface); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-left: 3px solid #e53935; cursor: pointer; }
+.redflag-dot { width: 10px; height: 10px; border-radius: 50%; background: #e53935; flex: 0 0 auto; }
+.redflag-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.redflag-go { color: var(--muted); font-size: 20px; flex: 0 0 auto; }
+
 /* Loading / empty */
 .loading { text-align: center; padding: 60px 20px; color: var(--muted); font-size: 14px; }
 .empty { text-align: center; padding: 40px 20px; color: var(--muted); }
@@ -139,13 +160,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     <img class="avatar" id="avatar" src="" alt="">
   </div>
   <div class="tabs">
-    <div class="tab active" onclick="switchTab('projects')">專案</div>
+    <div class="tab active" onclick="switchTab('dashboard')">儀表板</div>
+    <div class="tab" onclick="switchTab('projects')">專案</div>
     <div class="tab" onclick="switchTab('tasks')">待辦</div>
     <div class="tab" onclick="switchTab('claude')">Claude</div>
   </div>
 </div>
 
-<div id="page-projects" class="page active">
+<div id="page-dashboard" class="page active">
+  <div id="dashboard-content"><div class="loading">載入中…</div></div>
+</div>
+
+<div id="page-projects" class="page">
   <div id="projects-list"><div class="loading">載入中…</div></div>
 </div>
 
@@ -166,7 +192,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 <script>
 const API = '';
 const LIFF_ID = '2010243777-kq9FJSJT';
-let currentTab = 'projects';
+let currentTab = 'dashboard';
 let lineProfile = null;
 let currentProjectName = '';
 
@@ -206,6 +232,7 @@ function toast(msg) {
 }
 
 function loadAll() {
+  loadDashboard();
   loadProjects();
   loadTasks();
   loadClaude();
@@ -265,6 +292,35 @@ function renderDashboard(projects) {
   </div>`;
 }
 
+async function loadDashboard() {
+  const projects = await api('/api/projects/');
+  const el = document.getElementById('dashboard-content');
+
+  // 收集所有「紅燈（high）且未完成」任務，依建立時間早→晚
+  const reds = [];
+  for (const p of projects) for (const t of (p.tasks||[])) {
+    if ((t.priority==='high') && t.status!=='completed')
+      reds.push({...t, projectName: p.name, projectId: p.id});
+  }
+  reds.sort((a,b) => new Date(a.created_at||0) - new Date(b.created_at||0));
+
+  const redHTML = reds.length ? `
+    <div class="section-title">🔴 紅燈任務（${reds.length}）</div>
+    ${reds.map(t => `
+      <div class="redflag-card" onclick="showProjectDetail(${t.projectId},'')">
+        <span class="redflag-dot"></span>
+        <div style="flex:1;min-width:0">
+          <div class="redflag-title">${esc(t.title)}</div>
+          <div class="task-project">${esc(t.projectName)}${t.status==='in_progress'?' · 進行中':''}</div>
+        </div>
+        <span class="redflag-go">›</span>
+      </div>`).join('')}`
+    : `<div class="section-title">🔴 紅燈任務</div>
+       <div class="empty" style="padding:24px"><p>目前沒有紅燈任務 🎉</p></div>`;
+
+  el.innerHTML = renderDashboard(projects) + redHTML;
+}
+
 async function loadProjects() {
   const projects = await api('/api/projects/');
   const el = document.getElementById('projects-list');
@@ -272,7 +328,7 @@ async function loadProjects() {
     el.innerHTML = '<div class="empty"><div class="icon">📁</div><p>還沒有專案</p></div>';
     return;
   }
-  el.innerHTML = renderDashboard(projects) + projects.map(p => {
+  el.innerHTML = projects.map(p => {
     const tasks = p.tasks || [];
     const done = tasks.filter(t => t.status === 'completed').length;
     const pct = tasks.length ? Math.round(done/tasks.length*100) : 0;
@@ -302,6 +358,7 @@ async function deleteProject(id, name) {
   toast('專案已刪除');
   loadProjects();
   loadTasks();
+  loadDashboard();
 }
 
 async function showProjectDetail(id, name) {
@@ -358,6 +415,7 @@ async function cyclePriority(projectId, taskId, current) {
   if (document.getElementById('overlay').style.display !== 'none') showProjectDetail(projectId, '');
   loadTasks();
   loadProjects();
+  loadDashboard();
 }
 
 async function cycleTask(projectId, taskId, current) {
@@ -385,6 +443,7 @@ async function cycleTask(projectId, taskId, current) {
   if (document.getElementById('overlay').style.display !== 'none') showProjectDetail(projectId, '');
   loadTasks();
   loadProjects();
+  loadDashboard();
 }
 
 async function addTaskInline(projectId) {
@@ -394,6 +453,7 @@ async function addTaskInline(projectId) {
   toast('任務已新增');
   showProjectDetail(projectId, '');
   loadTasks();
+  loadDashboard();
 }
 
 // === Tasks ===
@@ -440,8 +500,54 @@ async function loadTasks() {
 }
 
 // === Claude ===
+function renderCodeUsage(cu) {
+  if (!cu || !cu.available) {
+    return `<div class="usage-card"><div class="usage-title">🖥 Claude Code 額度</div>
+      <div class="status-sub" style="margin-top:8px">尚無用量資料（等 hook 回報）</div></div>`;
+  }
+  const pct = cu.usage_pct || 0;
+  const color = pct>=90 ? '#e53935' : pct>=70 ? '#e36209' : '#06C755';
+  const w = cu.window_5h || {};
+  // token 分項條：以四項中的最大值為比例基準
+  const items = [
+    {k:'輸入', v:w.input||0},
+    {k:'輸出', v:w.output||0},
+    {k:'快取讀', v:w.cache_read||0},
+    {k:'快取寫', v:w.cache_write||0},
+  ];
+  const max = Math.max(1, ...items.map(i=>i.v));
+  let resetTxt = '';
+  if (cu.window_reset_at) {
+    const remain = (new Date(cu.window_reset_at) - new Date())/1000;
+    if (remain > 0) resetTxt = `最舊用量約 ${Math.floor(remain/3600)} 小時 ${Math.floor((remain%3600)/60)} 分後釋放`;
+    else resetTxt = '額度已釋放';
+  }
+  const t = cu.today || {};
+  return `
+  <div class="usage-card">
+    <div class="usage-head">
+      <span class="usage-title">🖥 Claude Code 額度（5 小時視窗）</span>
+      ${cu.current_model ? `<span class="usage-model">${esc(cu.current_model)}</span>` : ''}
+    </div>
+    <div class="usage-pct" style="color:${color}">${pct}%</div>
+    <div class="usage-bar"><div class="usage-fill" style="width:${pct}%;background:${color}"></div></div>
+    ${resetTxt ? `<div class="usage-reset">⏱ ${resetTxt}</div>` : ''}
+    ${items.map(i => `
+      <div class="tok-row">
+        <span class="tok-label">${i.k}</span>
+        <span class="tok-track"><span class="tok-fill" style="width:${Math.round(i.v/max*100)}%"></span></span>
+        <span class="tok-val">${fmtNum(i.v)}</span>
+      </div>`).join('')}
+    <div class="stat-row" style="margin-top:14px">
+      <div class="stat-box"><div class="stat-val">${fmtNum(t.input)}</div><div class="stat-label">今日輸入</div></div>
+      <div class="stat-box"><div class="stat-val">${fmtNum(t.output)}</div><div class="stat-label">今日輸出</div></div>
+      <div class="stat-box"><div class="stat-val">${t.messages||0}</div><div class="stat-label">今日訊息</div></div>
+    </div>
+  </div>`;
+}
+
 async function loadClaude() {
-  const [s, queue] = await Promise.all([api('/api/claude/status'), api('/api/claude/queue')]);
+  const [s, queue, cu] = await Promise.all([api('/api/claude/status'), api('/api/claude/queue'), api('/api/claude/code-usage')]);
   const el = document.getElementById('claude-content');
   const isOk = !s.is_rate_limited;
   el.innerHTML = `
@@ -456,6 +562,7 @@ async function loadClaude() {
       </div>
       ${s.is_rate_limited ? `<button class="resolve-btn" onclick="resolveRateLimit()">手動解除限速</button>` : ''}
     </div>
+    ${renderCodeUsage(cu)}
     ${queue.length ? `
     <div class="section-title">待續接任務</div>
     ${queue.map(q => `
@@ -491,7 +598,7 @@ async function cancelQueue(id) {
 
 // === FAB ===
 function showFab() {
-  if (currentTab === 'projects') showCreateProject();
+  if (currentTab === 'projects' || currentTab === 'dashboard') showCreateProject();
   else if (currentTab === 'tasks') showCreateQueue();
   else showCreateQueue();
 }
@@ -513,6 +620,7 @@ async function createProject() {
   closeSheetForce();
   toast('專案已建立');
   loadProjects();
+  loadDashboard();
 }
 
 function showCreateQueue() {
@@ -552,7 +660,7 @@ function closeSheetForce() { document.getElementById('overlay').style.display='n
 function switchTab(tab) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach((el,i) => {
-    el.classList.toggle('active', ['projects','tasks','claude'][i]===tab);
+    el.classList.toggle('active', ['dashboard','projects','tasks','claude'][i]===tab);
   });
   document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
   document.getElementById(`page-${tab}`).classList.add('active');
