@@ -71,10 +71,15 @@ class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     status: Optional[ProjectStatus] = None
+    order: Optional[int] = None
+
+class ProjectReorder(BaseModel):
+    ids: List[int]
 
 class ProjectOut(ProjectBase):
     id: int
     status: ProjectStatus
+    order: int = 0
     milestones: List[MilestoneOut] = []
     tasks: List[TaskOut] = []
     created_at: datetime

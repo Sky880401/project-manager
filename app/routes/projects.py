@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from app.database import get_db
 from app.models.project import Project, Milestone, Task
 from app.schemas.project import (
-    ProjectCreate, ProjectUpdate, ProjectOut,
+    ProjectCreate, ProjectUpdate, ProjectOut, ProjectReorder,
     MilestoneCreate, MilestoneUpdate, MilestoneOut,
     TaskCreate, TaskUpdate, TaskOut,
 )
@@ -20,7 +20,20 @@ def _now():
 
 @router.get("/", response_model=List[ProjectOut])
 def list_projects(db: Session = Depends(get_db)):
-    return db.query(Project).filter(Project.deleted_at.is_(None)).all()
+    return db.query(Project).filter(Project.deleted_at.is_(None)).order_by(
+        Project.order.asc(), Project.created_at.asc()
+    ).all()
+
+
+@router.post("/reorder", response_model=List[ProjectOut])
+def reorder_projects(data: ProjectReorder, db: Session = Depends(get_db)):
+    # 依傳入的 id 順序設定 order；未列到的維持在後面
+    for idx, pid in enumerate(data.ids):
+        db.query(Project).filter(Project.id == pid, Project.deleted_at.is_(None)).update({"order": idx})
+    db.commit()
+    return db.query(Project).filter(Project.deleted_at.is_(None)).order_by(
+        Project.order.asc(), Project.created_at.asc()
+    ).all()
 
 
 @router.get("/trash", response_model=List[ProjectOut])

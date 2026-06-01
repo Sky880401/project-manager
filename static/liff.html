@@ -145,6 +145,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .project-card.checked, .task-card.checked { outline: 2px solid var(--red); }
 .icon-btn { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; width: 40px; padding: 8px 0; font-size: 14px; cursor: pointer; }
 
+/* Drag to reorder */
+.proj-head { display: flex; align-items: flex-start; gap: 8px; }
+.drag-handle { font-size: 18px; color: var(--muted); cursor: grab; touch-action: none; padding: 0 2px; line-height: 1.2; flex: 0 0 auto; user-select: none; }
+.project-card.dragging { opacity: 0.6; outline: 2px dashed var(--line); }
+
 /* Claude Code usage */
 .usage-card { background: var(--surface); border-radius: var(--radius); padding: 18px 16px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
 .usage-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
@@ -440,9 +445,14 @@ async function loadProjects() {
       </div>`;
     }
     return `
-    <div class="project-card">
-      <div class="project-name">${esc(p.name)}</div>
-      <div class="project-desc">${esc(p.description||'')}</div>
+    <div class="project-card" id="proj-${p.id}" data-id="${p.id}">
+      <div class="proj-head">
+        <div class="drag-handle" onpointerdown="startDrag(event, ${p.id})" title="拖拉排序">⠿</div>
+        <div style="flex:1;min-width:0">
+          <div class="project-name">${esc(p.name)}</div>
+          <div class="project-desc">${esc(p.description||'')}</div>
+        </div>
+      </div>
       <div class="project-meta">
         <span class="badge ${p.status}">${statusLabel}</span>
         <div class="progress-wrap">
@@ -456,6 +466,40 @@ async function loadProjects() {
       </div>
     </div>`;
   }).join('');
+}
+
+// === 拖拉排序專案 ===
+let dragEl = null;
+function startDrag(e, id) {
+  if (selectMode) return;
+  e.preventDefault();
+  dragEl = document.getElementById('proj-' + id);
+  if (!dragEl) return;
+  dragEl.classList.add('dragging');
+  document.addEventListener('pointermove', onDragMove);
+  document.addEventListener('pointerup', onDragUp, {once:true});
+}
+function onDragMove(e) {
+  if (!dragEl) return;
+  e.preventDefault();
+  const list = document.getElementById('projects-list');
+  const cards = [...list.querySelectorAll('.project-card')].filter(c => c !== dragEl);
+  let after = null;
+  for (const c of cards) {
+    const r = c.getBoundingClientRect();
+    if (e.clientY < r.top + r.height / 2) { after = c; break; }
+  }
+  if (after) list.insertBefore(dragEl, after);
+  else list.appendChild(dragEl);
+}
+async function onDragUp() {
+  document.removeEventListener('pointermove', onDragMove);
+  if (dragEl) dragEl.classList.remove('dragging');
+  dragEl = null;
+  const ids = [...document.getElementById('projects-list').querySelectorAll('.project-card')].map(c => +c.dataset.id);
+  await api('/api/projects/reorder', {method:'POST', body:{ids}});
+  toast('順序已儲存');
+  loadDashboard();
 }
 
 async function showEditProject(id) {
