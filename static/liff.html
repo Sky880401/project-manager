@@ -604,7 +604,14 @@ async function dispatchHermes(projectId, taskId) {
   if (!title) return;
   const desc = document.getElementById('et-desc').value.trim();
   const prompt = desc ? `${title}\n\n${desc}` : title;
-  await api('/api/hermes/jobs', {method:'POST', body:{prompt, task_id: taskId}});
+  let id_token = null;
+  try { id_token = liff.getIDToken(); } catch(_) {}
+  const res = await fetch(API + '/api/hermes/jobs', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({prompt, task_id: taskId, id_token}),
+  });
+  if (res.status === 403) { toast('未授權：只有你本人能派工'); return; }
+  if (!res.ok) { toast('派工失敗'); return; }
   closeSheetForce();
   toast('已派給 Hermes 執行 🤖');
   switchTab('claude');

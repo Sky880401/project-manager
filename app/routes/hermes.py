@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timezone
 import os
+import logging
+import requests
 
 from pydantic import BaseModel
 from app.database import get_db
@@ -19,8 +21,32 @@ from app.models.claude_usage import HermesJob
 from app.services.line_push import push_to_all
 
 router = APIRouter(prefix="/hermes", tags=["hermes"])
+logger = logging.getLogger(__name__)
 
 WORKER_TOKEN = os.getenv("HERMES_WORKER_TOKEN", "")
+# 只有這些 LINE userId 能派工（逗號分隔）；留空＝不限制（僅供測試）
+ALLOWED_USERS = [u.strip() for u in os.getenv("HERMES_ALLOWED_USERS", "").split(",") if u.strip()]
+# LINE Login channel id，用來驗證 LIFF 的 id_token（= LIFF_ID 的前綴數字）
+LINE_CHANNEL_ID = os.getenv("HERMES_LINE_CHANNEL_ID", "")
+
+
+def _verify_line_user(id_token: str | None) -> str | None:
+    """用 LINE verify 端點驗證 id_token，回傳真實 userId(sub)，失敗回 None。"""
+    if not id_token or not LINE_CHANNEL_ID:
+        return None
+    try:
+        r = requests.post(
+            "https://api.line.me/oauth2/v2.1/verify",
+            data={"id_token": id_token, "client_id": LINE_CHANNEL_ID},
+            timeout=10,
+        )
+        if r.status_code != 200:
+            logger.warning(f"LINE verify failed: {r.status_code} {r.text[:120]}")
+            return None
+        return r.json().get("sub")
+    except Exception as e:
+        logger.warning(f"LINE verify error: {e}")
+        return None
 
 
 def _now():
@@ -36,6 +62,7 @@ def _require_worker(token: Optional[str]):
 class JobCreate(BaseModel):
     prompt: str
     task_id: Optional[int] = None
+    id_token: Optional[str] = None
 
 class JobComplete(BaseModel):
     result: Optional[str] = None
@@ -59,6 +86,11 @@ class JobOut(BaseModel):
 def create_job(data: JobCreate, db: Session = Depends(get_db)):
     if not data.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt is empty")
+    # 白名單：只有指定 LINE userId 能派工
+    if ALLOWED_USERS:
+        sub = _verify_line_user(data.id_token)
+        if sub not in ALLOWED_USERS:
+            raise HTTPException(status_code=403, detail="只有授權的 LINE 帳號能派工給 Hermes")
     job = HermesJob(prompt=data.prompt.strip(), task_id=data.task_id, status="queued")
     db.add(job)
     db.commit()
