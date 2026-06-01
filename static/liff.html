@@ -107,6 +107,24 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .queue-btn.resume { background: var(--line); color: #fff; }
 .queue-btn.cancel { background: var(--bg); color: var(--muted); }
 
+/* Dashboard */
+.dashboard { background: var(--surface); border-radius: var(--radius); padding: 18px 16px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+.dash-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 14px; display: flex; align-items: center; gap: 6px; }
+.dash-main { display: flex; align-items: center; gap: 18px; }
+.donut-wrap { position: relative; flex: 0 0 auto; width: 120px; height: 120px; }
+.donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.donut-pct { font-size: 26px; font-weight: 800; line-height: 1; }
+.donut-cap { font-size: 10px; color: var(--muted); margin-top: 3px; }
+.dash-legend { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.legend-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+.legend-label { color: var(--muted); flex: 1; }
+.legend-val { font-weight: 700; }
+.dash-stats { display: flex; gap: 10px; margin-top: 16px; }
+.dash-stat { flex: 1; background: var(--bg); border-radius: 10px; padding: 10px; text-align: center; }
+.dash-stat-val { font-size: 20px; font-weight: 800; }
+.dash-stat-label { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
 /* Loading / empty */
 .loading { text-align: center; padding: 60px 20px; color: var(--muted); font-size: 14px; }
 .empty { text-align: center; padding: 40px 20px; color: var(--muted); }
@@ -194,6 +212,59 @@ function loadAll() {
 }
 
 // === Projects ===
+function renderDashboard(projects) {
+  let done=0, prog=0, todo=0;
+  for (const p of projects) for (const t of (p.tasks||[])) {
+    if (t.status==='completed') done++;
+    else if (t.status==='in_progress') prog++;
+    else todo++;
+  }
+  const total = done+prog+todo;
+  const pct = total ? Math.round(done/total*100) : 0;
+  const activeProjects = projects.filter(p => p.status==='active').length;
+
+  // SVG 環圈圖：以 stroke-dasharray 切出三段
+  const R = 54, C = 2*Math.PI*R;
+  const segs = [
+    {v:done, color:'#06C755'},
+    {v:prog, color:'#0366d6'},
+    {v:todo, color:'#d0d7de'},
+  ];
+  let offset = 0;
+  const circles = total ? segs.filter(s=>s.v>0).map(s => {
+    const len = s.v/total*C;
+    const c = `<circle cx="60" cy="60" r="${R}" fill="none" stroke="${s.color}" stroke-width="12"
+      stroke-dasharray="${len} ${C-len}" stroke-dashoffset="${-offset}"
+      transform="rotate(-90 60 60)"/>`;
+    offset += len;
+    return c;
+  }).join('') : `<circle cx="60" cy="60" r="${R}" fill="none" stroke="var(--border)" stroke-width="12"/>`;
+
+  return `
+  <div class="dashboard">
+    <div class="dash-title">📊 主控儀表板</div>
+    <div class="dash-main">
+      <div class="donut-wrap">
+        <svg width="120" height="120" viewBox="0 0 120 120">${circles}</svg>
+        <div class="donut-center">
+          <div class="donut-pct">${pct}%</div>
+          <div class="donut-cap">完成率</div>
+        </div>
+      </div>
+      <div class="dash-legend">
+        <div class="legend-row"><span class="legend-dot" style="background:#06C755"></span><span class="legend-label">已完成</span><span class="legend-val">${done}</span></div>
+        <div class="legend-row"><span class="legend-dot" style="background:#0366d6"></span><span class="legend-label">進行中</span><span class="legend-val">${prog}</span></div>
+        <div class="legend-row"><span class="legend-dot" style="background:#d0d7de"></span><span class="legend-label">待做</span><span class="legend-val">${todo}</span></div>
+      </div>
+    </div>
+    <div class="dash-stats">
+      <div class="dash-stat"><div class="dash-stat-val">${projects.length}</div><div class="dash-stat-label">專案總數</div></div>
+      <div class="dash-stat"><div class="dash-stat-val" style="color:var(--line-dark)">${activeProjects}</div><div class="dash-stat-label">進行中專案</div></div>
+      <div class="dash-stat"><div class="dash-stat-val">${total}</div><div class="dash-stat-label">任務總數</div></div>
+    </div>
+  </div>`;
+}
+
 async function loadProjects() {
   const projects = await api('/api/projects/');
   const el = document.getElementById('projects-list');
@@ -201,7 +272,7 @@ async function loadProjects() {
     el.innerHTML = '<div class="empty"><div class="icon">📁</div><p>還沒有專案</p></div>';
     return;
   }
-  el.innerHTML = projects.map(p => {
+  el.innerHTML = renderDashboard(projects) + projects.map(p => {
     const tasks = p.tasks || [];
     const done = tasks.filter(t => t.status === 'completed').length;
     const pct = tasks.length ? Math.round(done/tasks.length*100) : 0;
@@ -242,14 +313,19 @@ async function showProjectDetail(id, name) {
     <div class="sheet-handle"></div>
     <div class="sheet-title">📁 ${esc(p.name)}</div>
     ${milestones.map(m => {
-      const mTasks = tasks.filter(t => t.milestone_id === m.id);
+      const mTasks = sortTasks(tasks.filter(t => t.milestone_id === m.id));
       const done = mTasks.filter(t => t.status==='completed').length;
       return `
       <div class="section-title">${esc(m.name)} (${done}/${mTasks.length})</div>
       ${mTasks.map(t => taskHTML(t, id)).join('')}`;
     }).join('')}
-    <div class="section-title">未分類任務</div>
-    ${tasks.filter(t=>!t.milestone_id).map(t => taskHTML(t, id)).join('')}
+    ${(() => {
+      const uncat = sortTasks(tasks.filter(t=>!t.milestone_id));
+      if (!uncat.length) return '';
+      // 有里程碑時這些才算「未分類」；沒里程碑時就是全部任務
+      const title = milestones.length ? '未分類任務' : '任務';
+      return `<div class="section-title">${title}</div>${uncat.map(t => taskHTML(t, id)).join('')}`;
+    })()}
     <div style="margin-top:16px">
       <input id="new-task-input" placeholder="新增任務…" style="width:100%;padding:12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;margin-bottom:8px">
       <button class="sheet-btn" onclick="addTaskInline(${id})">新增任務</button>
@@ -278,8 +354,10 @@ async function cyclePriority(projectId, taskId, current) {
   const next = {high:'medium', medium:'low', low:'high'};
   const nextPrio = next[current] || 'medium';
   await api(`/api/projects/${projectId}/tasks/${taskId}`, {method:'PATCH', body:{priority:nextPrio}});
-  showProjectDetail(projectId, '');
+  // 只在專案詳情視窗開著時才重繪它；待辦頁點擊不應彈出視窗
+  if (document.getElementById('overlay').style.display !== 'none') showProjectDetail(projectId, '');
   loadTasks();
+  loadProjects();
 }
 
 async function cycleTask(projectId, taskId, current) {
@@ -304,8 +382,9 @@ async function cycleTask(projectId, taskId, current) {
     }
   }
 
-  showProjectDetail(projectId, '');
+  if (document.getElementById('overlay').style.display !== 'none') showProjectDetail(projectId, '');
   loadTasks();
+  loadProjects();
 }
 
 async function addTaskInline(projectId) {
@@ -335,7 +414,7 @@ async function loadTasks() {
   let html = '';
   if (inprog.length) {
     html += '<div class="section-title">進行中</div>';
-    html += inprog.map(t => `
+    html += sortTasks(inprog).map(t => `
       <div class="task-card">
         <div class="task-check progress" onclick="cycleTask(${t.projectId},${t.id},'in_progress')">▶</div>
         <div style="flex:1">
@@ -347,8 +426,7 @@ async function loadTasks() {
   }
   if (todo.length) {
     html += '<div class="section-title">待做</div>';
-    todo.sort((a,b) => ({high:0,medium:1,low:2}[a.priority||'medium']) - ({high:0,medium:1,low:2}[b.priority||'medium']));
-    html += todo.slice(0,15).map(t => `
+    html += sortTasks(todo).slice(0,15).map(t => `
       <div class="task-card">
         <div class="task-check" onclick="cycleTask(${t.projectId},${t.id},'todo')"></div>
         <div style="flex:1">
@@ -478,6 +556,16 @@ function switchTab(tab) {
   });
   document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
   document.getElementById(`page-${tab}`).classList.add('active');
+}
+
+// 優先度排序：紅(high)最上，同優先依建立時間早→晚
+const PRIO_RANK = {high:0, medium:1, low:2};
+function sortTasks(tasks) {
+  return tasks.slice().sort((a,b) => {
+    const pr = (PRIO_RANK[a.priority||'medium']) - (PRIO_RANK[b.priority||'medium']);
+    if (pr !== 0) return pr;
+    return new Date(a.created_at||0) - new Date(b.created_at||0);
+  });
 }
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
