@@ -44,17 +44,21 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+# LINE LIFF / 行動瀏覽器會狠狠快取 HTML，導致部署後使用者看不到更新。
+# 對 HTML 入口一律回 no-cache，讓每次開啟都重抓最新（JS/邏輯都在這幾頁內）。
+NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
+
 @app.get("/api-explorer", include_in_schema=False)
 def api_explorer():
-    return FileResponse(os.path.join(STATIC_DIR, "api-explorer.html"))
+    return FileResponse(os.path.join(STATIC_DIR, "api-explorer.html"), headers=NO_CACHE)
 
 @app.get("/dashboard", include_in_schema=False)
 def dashboard():
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"), headers=NO_CACHE)
 
 @app.get("/liff", include_in_schema=False)
 def liff():
-    return FileResponse(os.path.join(STATIC_DIR, "liff.html"))
+    return FileResponse(os.path.join(STATIC_DIR, "liff.html"), headers=NO_CACHE)
 
 
 def backup_database():
