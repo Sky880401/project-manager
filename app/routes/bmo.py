@@ -156,6 +156,65 @@ def list_workspaces():
     return [{"key": w, "label": WORKSPACE_LABELS.get(w, w)} for w in WORKSPACES]
 
 
+def _diff_lines(diff: Optional[str]) -> int:
+    """估算變更量：diff 內以 + / - 開頭（非 +++/--- 檔頭）的行數。"""
+    if not diff:
+        return 0
+    n = 0
+    for ln in diff.split("\n"):
+        if (ln.startswith("+") and not ln.startswith("+++")) or \
+           (ln.startswith("-") and not ln.startswith("---")):
+            n += 1
+    return n
+
+
+@router.get("/stats")
+def bmo_stats(days: int = 14, db: Session = Depends(get_db)):
+    """每個專案（workspace）的資源使用量與每日開發量，供 LIFF 圖表呈現。
+
+    資源使用量：各 workspace 累計的 job 數與變更行數（diff +/- 行）。
+    每日開發量：近 days 天，各 workspace 每天完成的 job 數。
+    """
+    from datetime import timedelta
+    jobs = db.query(BmoJob).all()
+
+    # 各 workspace 累計資源使用量
+    per_ws: dict[str, dict] = {}
+    for j in jobs:
+        ws = j.workspace or DEFAULT_WORKSPACE
+        s = per_ws.setdefault(ws, {"jobs": 0, "done": 0, "lines": 0})
+        s["jobs"] += 1
+        if j.status == "done":
+            s["done"] += 1
+        s["lines"] += _diff_lines(j.diff)
+
+    resources = [
+        {"workspace": ws, "label": WORKSPACE_LABELS.get(ws, ws), **s}
+        for ws, s in sorted(per_ws.items(), key=lambda kv: -kv[1]["lines"])
+    ]
+
+    # 每日開發量（近 days 天，依完成日期計）
+    today = _now().date()
+    day_keys = [(today - timedelta(days=i)) for i in range(days - 1, -1, -1)]
+    daily = {d.isoformat(): 0 for d in day_keys}
+    earliest = day_keys[0]
+    for j in jobs:
+        ts = j.finished_at or j.created_at
+        if not ts:
+            continue
+        d = ts.date()
+        if d < earliest:
+            continue
+        key = d.isoformat()
+        if key in daily:
+            daily[key] += 1
+
+    return {
+        "resources": resources,
+        "daily": [{"date": k, "count": v} for k, v in daily.items()],
+    }
+
+
 @router.post("/jobs", response_model=JobOut, status_code=201)
 def create_job(data: JobCreate, db: Session = Depends(get_db)):
     if not data.prompt.strip():
