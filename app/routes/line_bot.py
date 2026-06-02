@@ -32,7 +32,9 @@ CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET", "")
 CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
 
 # 儀表板 LIFF 連結（可用 LIFF_ID 覆寫，否則用既有預設）
-LIFF_ID = os.getenv("LIFF_ID", "2010243777-kq9FJSJT")
+# 注意：用 `or` 而非 getenv 預設值 —— .env 若有 `LIFF_ID=`（空字串）會讓 getenv 預設失效，
+# 導致 URL 變成 https://liff.line.me/ 破連結。空值也要 fallback 到預設。
+LIFF_ID = os.getenv("LIFF_ID") or "2010243777-kq9FJSJT"
 DASHBOARD_URL = f"https://liff.line.me/{LIFF_ID}"
 
 handler = WebhookHandler(CHANNEL_SECRET)

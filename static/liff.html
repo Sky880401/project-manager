@@ -657,7 +657,8 @@ async function cycleTask(projectId, taskId, current) {
       try {
         await liff.sendMessages([{
           type: 'text',
-          text: `✅ 完成任務：[${currentProjectName}] ${res.title}`
+          // 沒專案名稱時不要帶空的 []（會被 bot 回成「👏 [] …」）
+          text: `✅ 完成任務：${currentProjectName ? `[${currentProjectName}] ` : ''}${res.title}`
         }]);
         toast('已傳送完成通知到 LINE');
       } catch(e) {
