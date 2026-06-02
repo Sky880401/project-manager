@@ -174,6 +174,8 @@ body.no-select, body.no-select * { -webkit-user-select: none !important; user-se
 .redflag-dot { width: 10px; height: 10px; border-radius: 50%; background: #e53935; flex: 0 0 auto; }
 .redflag-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .redflag-go { color: var(--muted); font-size: 20px; flex: 0 0 auto; }
+.yellowflag-card { background: var(--surface); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-left: 3px solid #f9a825; cursor: pointer; }
+.yellowflag-dot { width: 10px; height: 10px; border-radius: 50%; background: #f9a825; flex: 0 0 auto; }
 
 /* Loading / empty */
 .loading { text-align: center; padding: 60px 20px; color: var(--muted); font-size: 14px; }
@@ -434,7 +436,29 @@ async function loadDashboard() {
     : `<div class="section-title">🔴 紅燈任務</div>
        <div class="empty" style="padding:24px"><p>目前沒有紅燈任務 🎉</p></div>`;
 
-  el.innerHTML = renderDashboard(projects) + redHTML;
+  // 收集所有「黃燈（medium）且未完成」任務，依建立時間早→晚
+  const yellows = [];
+  for (const p of projects) for (const t of (p.tasks||[])) {
+    if ((t.priority==='medium' || !t.priority) && t.status!=='completed')
+      yellows.push({...t, projectName: p.name, projectId: p.id});
+  }
+  yellows.sort((a,b) => new Date(a.created_at||0) - new Date(b.created_at||0));
+
+  const yellowHTML = yellows.length ? `
+    <div class="section-title">🟡 黃燈任務（${yellows.length}）</div>
+    ${yellows.map(t => `
+      <div class="yellowflag-card" onclick="showProjectDetail(${t.projectId},'')">
+        <span class="yellowflag-dot"></span>
+        <div style="flex:1;min-width:0">
+          <div class="redflag-title">${esc(t.title)}</div>
+          <div class="task-project">${esc(t.projectName)}${t.status==='in_progress'?' · 進行中':''}</div>
+        </div>
+        <span class="redflag-go">›</span>
+      </div>`).join('')}`
+    : `<div class="section-title">🟡 黃燈任務</div>
+       <div class="empty" style="padding:24px"><p>目前沒有黃燈任務 🎉</p></div>`;
+
+  el.innerHTML = renderDashboard(projects) + redHTML + yellowHTML;
 }
 
 async function loadProjects() {
