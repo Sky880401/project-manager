@@ -802,7 +802,7 @@ async function loadBmo() {
     const feedback = hasFeedback ? `
       <details style="margin-top:8px">
         <summary style="font-size:12px;color:var(--blue);cursor:pointer;font-weight:600">查看 BMO 反饋</summary>
-        ${j.result ? `<div class="task-desc" style="max-height:160px;overflow:auto;margin-top:8px">${esc(j.result)}</div>` : ''}
+        ${j.result ? `<div class="task-desc" style="max-height:160px;overflow:auto;margin-top:8px;white-space:pre-wrap">${esc(plainify(j.result))}</div>` : ''}
         ${j.status==='error' && j.error ? `<div class="task-desc" style="color:var(--red);margin-top:8px">${esc(j.error)}</div>` : ''}
         ${j.diff ? `<pre style="background:#0d1117;color:#c9d1d9;font-size:11px;padding:10px;border-radius:8px;overflow:auto;max-height:240px;margin-top:8px;white-space:pre">${esc(j.diff)}</pre>` : ''}
       </details>` : '';
@@ -1005,6 +1005,21 @@ function sortTasks(tasks) {
 }
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+// 把 markdown 清成純文字（LINE/LIFF 無法顯示粗體/表格/項目符號）
+function plainify(s) {
+  return String(s||'').split('\n').filter(ln => {
+    if (/^\s*```/.test(ln)) return false;                                  // 程式碼框
+    if (/^\s*\|?\s*[-:]+\s*(\|\s*[-:]+\s*)+\|?\s*$/.test(ln)) return false; // 表格分隔線
+    return true;
+  }).map(ln => ln
+    .replace(/^\s*#{1,6}\s*/,'')        // 標題
+    .replace(/\*\*(.+?)\*\*/g,'$1')     // 粗體
+    .replace(/(?<!\*)\*(?!\*)(.+?)\*/g,'$1') // 斜體
+    .replace(/^\s*[-*]\s+/,'')          // 項目符號
+    .replace(/[|`]/g,' ')
+    .trimEnd()
+  ).join('\n').replace(/\n{3,}/g,'\n\n').trim();
+}
 function fmtNum(n) { return n>=1000?(n/1000).toFixed(1)+'k':String(n||0); }
 
 init();

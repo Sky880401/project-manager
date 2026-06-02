@@ -58,6 +58,39 @@ def _now():
     return datetime.now(timezone.utc)
 
 
+def _clean_title(prompt: Optional[str]) -> str:
+    """取出可讀標題：延續任務的 prompt 是自動包裝文，抓出使用者真正的 comment。"""
+    p = prompt or ""
+    marker = "我對上述變更的 review comment：\n"
+    if marker in p:
+        rest = p.split(marker, 1)[1]
+        line = rest.strip().split("\n", 1)[0].strip()
+        if line:
+            return line[:40]
+    return p.strip().split("\n", 1)[0][:40]
+
+
+def _line_plain(text: str) -> str:
+    """把 markdown 清成 LINE 看得懂的純文字（去粗體/標題/項目符號/表格/程式碼框）。"""
+    import re
+    out = []
+    for ln in (text or "").split("\n"):
+        s = ln.rstrip()
+        if re.match(r"^\s*```", s):           # 程式碼框圍欄
+            continue
+        if re.match(r"^\s*\|?\s*[-:]+\s*(\|\s*[-:]+\s*)+\|?\s*$", s):  # 表格分隔線
+            continue
+        s = re.sub(r"^\s*#{1,6}\s*", "", s)    # 標題 #
+        s = re.sub(r"\*\*(.+?)\*\*", r"\1", s) # 粗體
+        s = re.sub(r"(?<!\*)\*(?!\*)(.+?)\*", r"\1", s)  # 斜體
+        s = re.sub(r"^\s*[-*]\s+", "", s)      # 項目符號 - *
+        s = s.replace("|", " ").replace("`", "")
+        out.append(s.strip())
+    # 收掉多餘空行
+    cleaned = "\n".join(out)
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+
 def _require_worker(token: Optional[str]):
     if WORKER_TOKEN and token != WORKER_TOKEN:
         raise HTTPException(status_code=401, detail="invalid worker token")
@@ -239,15 +272,16 @@ def complete_job(job_id: int, data: JobComplete,
     db.commit()
     db.refresh(job)
 
-    # LINE 通知
-    head = (job.prompt or "")[:40]
+    # LINE 通知（精簡：標題用真正的 comment，內容取結論開頭，純文字）
+    head = _clean_title(job.prompt)
     if job.kind == "deploy" and job.status == "done":
-        msg = f"🚀 BMO 已合併並上線 #{job.id}\n{(job.result or '')[-300:]}"
+        msg = f"🚀 BMO 已合併並上線 #{job.id}"
     elif job.status == "done":
-        snippet = (job.result or "")[-400:]
-        msg = f"🤖 BMO 完成任務 #{job.id}\n「{head}」\n\n{snippet}"
+        # OUTPUT_GUIDE 已讓 BMO 把「✅完成/結論」放開頭，取前 300 字即可
+        snippet = _line_plain(job.result or "")[:300]
+        msg = f"🤖 BMO #{job.id}「{head}」\n{snippet}"
     else:
-        msg = f"⚠️ BMO 任務 #{job.id} 失敗\n「{head}」\n\n{(job.error or '')[:300]}"
+        msg = f"⚠️ BMO #{job.id}「{head}」失敗\n{_line_plain(job.error or '')[:200]}"
     try:
         push_to_all(db, msg)
         job.notified = True
