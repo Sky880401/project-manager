@@ -66,15 +66,15 @@ def _load_font(size):
 
 
 def build_image() -> bytes:
-    img = Image.new("RGB", (WIDTH, HEIGHT), "#ffffff")
+    img = Image.new("RGB", (WIDTH, HEIGHT), "#f2f3f5")  # 淺灰底襯托圓角卡片
     d = ImageDraw.Draw(img)
     half = WIDTH // 2
 
-    # 左格（儀表板）綠底、右格（紅燈）紅底
-    d.rectangle([0, 0, half, HEIGHT], fill="#06C755")
-    d.rectangle([half, 0, WIDTH, HEIGHT], fill="#e53935")
-    # 中間分隔線
-    d.rectangle([half - 3, 0, half + 3, HEIGHT], fill="#ffffff")
+    # 左格（儀表板）綠卡、右格（紅燈）紅卡 —— 圓角卡片（留白邊距襯托圓角）
+    pad = 70          # 卡片與邊緣／中線的留白
+    radius = 90       # 圓角半徑
+    d.rounded_rectangle([pad, pad, half - pad // 2, HEIGHT - pad], radius=radius, fill="#06C755")
+    d.rounded_rectangle([half + pad // 2, pad, WIDTH - pad, HEIGHT - pad], radius=radius, fill="#e53935")
 
     # 註：PIL 無法渲染彩色 emoji，選單圖以中文標籤為主
     label_font = _load_font(140)
