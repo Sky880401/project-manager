@@ -52,9 +52,21 @@ def is_git_repo() -> bool:
     return os.path.isdir(os.path.join(WORKSPACE, ".git"))
 
 
+# 回報格式守則：附加到每個 prompt，強制 BMO 用 LINE 看得懂的簡短純文字回報。
+# 使用者在 LINE/LIFF 看不到 markdown 粗體、項目符號、表格、縮排，且討厭落落長。
+OUTPUT_GUIDE = (
+    "\n\n---\n"
+    "【回報格式 · 務必遵守】完成後用繁體中文「純文字」回報，控制在 5 行內：\n"
+    "第 1 行：『✅ 完成：<任務一句話>』或『❌ 未完成：<原因一句話>』。\n"
+    "接著 1～3 句講結論／你做了什麼／使用者要不要做什麼。\n"
+    "嚴禁使用 markdown：不要 **粗體**、不要 - 或 * 項目符號、不要表格、不要縮排、不要程式碼框。"
+    "這些在 LINE 上無法顯示。要分點就用『1. 2. 3.』開頭的短句。"
+)
+
+
 def run_claude(prompt: str) -> tuple[str | None, str | None]:
     Path(WORKSPACE).mkdir(parents=True, exist_ok=True)
-    cmd = [CLAUDE_BIN, *CLAUDE_ARGS, "-p", prompt]
+    cmd = [CLAUDE_BIN, *CLAUDE_ARGS, "-p", prompt + OUTPUT_GUIDE]
     try:
         proc = subprocess.run(cmd, cwd=WORKSPACE, capture_output=True, text=True, timeout=TIMEOUT)
     except subprocess.TimeoutExpired:

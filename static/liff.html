@@ -793,6 +793,10 @@ async function loadBmo() {
   }
   const badge = {queued:'⏳ 排隊中',running:'⚙️ 執行中',done:'✅ 完成',error:'⚠️ 失敗'};
   el.innerHTML = jobs.slice(0,20).map(j => {
+    // 標題：延續任務的 prompt 是自動包裝文，抓出使用者真正的 comment 來顯示
+    let titleText = (j.prompt||'').split('\n')[0];
+    const m = (j.prompt||'').match(/review comment：\s*\n?([^\n]+)/);
+    if (m) titleText = '💬 ' + m[1].trim();
     const hasFeedback = (j.status==='done' && (j.result || j.diff)) || (j.status==='error' && j.error);
     // 反饋內容預設收起，點 summary 才展開
     const feedback = hasFeedback ? `
@@ -810,7 +814,7 @@ async function loadBmo() {
     ` : '';
     return `
       <div class="queue-card">
-        <div class="queue-desc">#${j.id} ${esc((j.prompt||'').split('\\n')[0])}${j.parent_id?` <span style="color:var(--muted);font-weight:400">(延續 #${j.parent_id})</span>`:''}</div>
+        <div class="queue-desc">#${j.id} ${esc(titleText)}${j.parent_id?` <span style="color:var(--muted);font-weight:400">(延續 #${j.parent_id})</span>`:''}</div>
         <div class="queue-ckpt">${badge[j.status]||j.status}${j.branch?` · 🌿 ${esc(j.branch)}`:''}</div>
         ${feedback}
         ${commentBox}
