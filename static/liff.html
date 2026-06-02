@@ -194,6 +194,10 @@ body.no-select, body.no-select * { -webkit-user-select: none !important; user-se
 .loading { text-align: center; padding: 60px 20px; color: var(--muted); font-size: 14px; }
 .empty { text-align: center; padding: 40px 20px; color: var(--muted); }
 .empty .icon { font-size: 40px; margin-bottom: 12px; }
+/* 一般使用者預覽模式：隱藏所有管理者專屬功能 */
+body.guest .admin-only { display: none !important; }
+#guest-banner { position: fixed; bottom: 0; left: 0; right: 0; background: #5b4ee5; color: #fff;
+  text-align: center; font-size: 12px; line-height: 1.4; padding: 8px 12px; z-index: 1000; }
 </style>
 </head>
 <body>
@@ -236,7 +240,8 @@ body.no-select, body.no-select * { -webkit-user-select: none !important; user-se
 </div>
 
 <div id="menu" class="menu" style="display:none">
-  <div class="menu-item" onclick="enterSelectMode()">🗑 選擇刪除</div>
+  <div class="menu-item admin-only" onclick="enterSelectMode()">🗑 選擇刪除</div>
+  <div class="menu-item" id="guest-toggle" onclick="toggleGuestPreview()">👤 以一般使用者身份預覽</div>
 </div>
 
 <div id="select-bar" class="select-bar" style="display:none">
@@ -274,6 +279,30 @@ function toggleMenu(e) {
 }
 function hideMenu() { document.getElementById('menu').style.display = 'none'; }
 document.addEventListener('click', hideMenu);
+
+// === 一般使用者預覽模式 ===
+// 管理者（你本人）用來預覽「其他加 BMO 好友的人」看得到、用得到哪些功能。
+// 開啟後隱藏所有 .admin-only 元素（派工、合併部署、回 comment、刪除等）。
+// 注意：這只是前端預覽；真正的權限控管在後端（BMO_ALLOWED_USERS + LINE id_token 驗證）。
+let isGuestPreview = false;
+function toggleGuestPreview() {
+  hideMenu();
+  isGuestPreview = !isGuestPreview;
+  document.body.classList.toggle('guest', isGuestPreview);
+  document.getElementById('guest-toggle').textContent =
+    isGuestPreview ? '👑 結束預覽，回到管理者' : '👤 以一般使用者身份預覽';
+  let banner = document.getElementById('guest-banner');
+  if (isGuestPreview && !banner) {
+    banner = document.createElement('div');
+    banner.id = 'guest-banner';
+    banner.textContent = '👤 一般使用者預覽中：看不到派工 / 合併部署 / 回 comment / 刪除等管理功能';
+    document.body.appendChild(banner);
+  } else if (!isGuestPreview && banner) {
+    banner.remove();
+  }
+  loadAll();
+  if (currentTab === 'bmo') loadBmo();
+}
 
 // === 多選刪除模式 ===
 function enterSelectMode() {
@@ -695,15 +724,16 @@ async function showEditTask(projectId, taskId) {
       <textarea id="et-desc" rows="3" style="resize:vertical;font-family:inherit">${esc(t.description||'')}</textarea>
     </div>
     <button class="sheet-btn" onclick="saveTask(${projectId},${taskId})">儲存</button>
-    <div class="field" style="margin-top:8px"><label>派給哪個專案執行</label>
+    <div class="field admin-only" style="margin-top:8px"><label>派給哪個專案執行</label>
       <select id="et-workspace" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit">
         ${BMO_WORKSPACES.map(w => `<option value="${w.key}">${esc(w.label)}</option>`).join('')}
       </select>
     </div>
-    <button class="sheet-btn" style="background:#5b4ee5;margin-top:8px" onclick="dispatchBmo(${projectId},${taskId})">🤖 交給 BMO 執行</button>
+    <button class="sheet-btn admin-only" style="background:#5b4ee5;margin-top:8px" onclick="dispatchBmo(${projectId},${taskId})">🤖 交給 BMO 執行</button>
   `);
 }
 async function dispatchBmo(projectId, taskId) {
+  if (isGuestPreview) { toast('預覽模式：一般使用者無法派工'); return; }
   const title = document.getElementById('et-title').value.trim();
   if (!title) return;
   const desc = document.getElementById('et-desc').value.trim();
@@ -910,8 +940,10 @@ async function loadBmo() {
     // comment 框維持常駐顯示（不收進 details）；只要任務完成就給框，
     // 即使這輪沒 diff（純問答/分析）也能回 comment 讓 BMO 同分支繼續
     const commentBox = (j.status==='done' && j.kind!=='deploy') ? `
+      <div class="admin-only">
       <textarea id="cmt-${j.id}" placeholder="對這次變更下 comment，回傳給 BMO 判斷下一步…" rows="2" style="width:100%;margin-top:8px;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;resize:vertical;font-family:inherit"></textarea>
       <button class="queue-btn resume" style="margin-top:6px;width:100%" onclick="commentBmo(${j.id})">💬 回傳 comment 給 BMO</button>
+      </div>
     ` : '';
     return `
       <div class="queue-card">
@@ -919,8 +951,8 @@ async function loadBmo() {
         <div class="queue-ckpt">${badge[j.status]||j.status}${j.workspace&&j.workspace!=='project-manager'?` · 📦 ${esc((BMO_WORKSPACES.find(w=>w.key===j.workspace)||{}).label||j.workspace)}`:''}${j.branch?` · 🌿 ${esc(j.branch)}`:''}</div>
         ${feedback}
         ${commentBox}
-        ${j.status==='done' && j.branch && j.kind!=='deploy' && j.diff ? `<button class="queue-btn resume" style="margin-top:8px;width:100%;background:#5b4ee5" onclick="deployBmo(${j.id})">🚀 合併並上線</button>` : ''}
-        <button class="queue-btn cancel" style="margin-top:8px;width:100%" onclick="archiveBmo(${j.id})">✅ 標注完成並隱藏</button>
+        ${j.status==='done' && j.branch && j.kind!=='deploy' && j.diff ? `<button class="queue-btn resume admin-only" style="margin-top:8px;width:100%;background:#5b4ee5" onclick="deployBmo(${j.id})">🚀 合併並上線</button>` : ''}
+        <button class="queue-btn cancel admin-only" style="margin-top:8px;width:100%" onclick="archiveBmo(${j.id})">✅ 標注完成並隱藏</button>
       </div>`;
   }).join('') + `<button onclick="loadBmo()" style="width:100%;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;font-size:13px;cursor:pointer;margin-top:8px">重新整理</button>`;
 }
