@@ -242,6 +242,12 @@ const LIFF_ID = '2010243777-kq9FJSJT';
 let currentTab = 'dashboard';
 let lineProfile = null;
 let currentProjectName = '';
+// BMO 可派工的 workspace（從後端載入；先給合理預設避免面板空白）
+let BMO_WORKSPACES = [{key:'project-manager',label:'專案管理器'},{key:'stock_quant',label:'Stocker'}];
+async function loadWorkspaces() {
+  try { const ws = await api('/api/bmo/workspaces'); if (Array.isArray(ws) && ws.length) BMO_WORKSPACES = ws; } catch(_) {}
+}
+loadWorkspaces();
 let selectMode = null;            // null | 'projects' | 'tasks'
 let selected = new Map();         // token -> meta（要刪除的項目）
 
@@ -603,6 +609,11 @@ async function showEditTask(projectId, taskId) {
       <textarea id="et-desc" rows="3" style="resize:vertical;font-family:inherit">${esc(t.description||'')}</textarea>
     </div>
     <button class="sheet-btn" onclick="saveTask(${projectId},${taskId})">儲存</button>
+    <div class="field" style="margin-top:8px"><label>派給哪個專案執行</label>
+      <select id="et-workspace" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit">
+        ${BMO_WORKSPACES.map(w => `<option value="${w.key}">${esc(w.label)}</option>`).join('')}
+      </select>
+    </div>
     <button class="sheet-btn" style="background:#5b4ee5;margin-top:8px" onclick="dispatchBmo(${projectId},${taskId})">🤖 交給 BMO 執行</button>
   `);
 }
@@ -611,11 +622,13 @@ async function dispatchBmo(projectId, taskId) {
   if (!title) return;
   const desc = document.getElementById('et-desc').value.trim();
   const prompt = desc ? `${title}\n\n${desc}` : title;
+  const wsEl = document.getElementById('et-workspace');
+  const workspace = wsEl ? wsEl.value : undefined;
   let id_token = null;
   try { id_token = liff.getIDToken(); } catch(_) {}
   const res = await fetch(API + '/api/bmo/jobs', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({prompt, task_id: taskId, id_token}),
+    body: JSON.stringify({prompt, task_id: taskId, workspace, id_token}),
   });
   if (res.status === 403) { toast('未授權：只有你本人能派工'); return; }
   if (!res.ok) { toast('派工失敗'); return; }
@@ -815,7 +828,7 @@ async function loadBmo() {
     return `
       <div class="queue-card">
         <div class="queue-desc">#${j.id} ${esc(titleText)}${j.parent_id?` <span style="color:var(--muted);font-weight:400">(延續 #${j.parent_id})</span>`:''}</div>
-        <div class="queue-ckpt">${badge[j.status]||j.status}${j.branch?` · 🌿 ${esc(j.branch)}`:''}</div>
+        <div class="queue-ckpt">${badge[j.status]||j.status}${j.workspace&&j.workspace!=='project-manager'?` · 📦 ${esc((BMO_WORKSPACES.find(w=>w.key===j.workspace)||{}).label||j.workspace)}`:''}${j.branch?` · 🌿 ${esc(j.branch)}`:''}</div>
         ${feedback}
         ${commentBox}
         ${j.status==='done' && j.branch && j.kind!=='deploy' && j.diff ? `<button class="queue-btn resume" style="margin-top:8px;width:100%;background:#5b4ee5" onclick="deployBmo(${j.id})">🚀 合併並上線</button>` : ''}

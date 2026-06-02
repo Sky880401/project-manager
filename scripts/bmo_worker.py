@@ -29,10 +29,21 @@ import requests
 API_BASE = os.getenv("BMO_API_BASE", "https://lxc.tail92862c.ts.net").rstrip("/")
 TOKEN = os.getenv("BMO_WORKER_TOKEN", "")
 WORKSPACE = os.path.expanduser(os.getenv("BMO_WORKSPACE", "~/project-manager"))
+# 這個 worker 負責的 workspace key（對應後端 BMO_WORKSPACES），只認領同 key 的 job
+WORKSPACE_KEY = os.getenv("BMO_WORKSPACE_KEY", "project-manager")
 POLL = int(os.getenv("BMO_POLL_SECONDS", "10"))
 TIMEOUT = int(os.getenv("BMO_TIMEOUT", "600"))
 CLAUDE_BIN = os.getenv("BMO_CLAUDE_BIN", "claude")
 CLAUDE_ARGS = shlex.split(os.getenv("BMO_CLAUDE_ARGS", ""))
+# 部署參數（不同 workspace 各異）：合併/推送的分支、部署目標 ssh host、遠端部署指令
+BASE_BRANCH = os.getenv("BMO_BASE_BRANCH", "main")
+DEPLOY_SSH = os.getenv("BMO_DEPLOY_SSH", "lxc")
+DEPLOY_CMD = os.getenv(
+    "BMO_DEPLOY_CMD",
+    "cd ~/project-manager && git pull --ff-only && "
+    "venv/bin/alembic upgrade head && systemctl restart project-manager && "
+    "sleep 2 && systemctl is-active project-manager",
+)
 
 HEADERS = {"X-Worker-Token": TOKEN} if TOKEN else {}
 
@@ -145,14 +156,14 @@ def deploy_branch(branch: str):
     if not is_git_repo():
         return None, "workspace 不是 git repo", branch, None
     try:
-        git("checkout", "main")
+        git("checkout", BASE_BRANCH)
         git("fetch", "origin")
         try:
-            git("merge", "--ff-only", "origin/main")  # 先跟上遠端
+            git("merge", "--ff-only", f"origin/{BASE_BRANCH}")  # 先跟上遠端
         except Exception:
             pass
     except Exception as e:
-        return None, f"切到 main 失敗：{e}", branch, None
+        return None, f"切到 {BASE_BRANCH} 失敗：{e}", branch, None
     # 合併分支
     try:
         git("merge", "--no-ff", "--no-edit", branch)
@@ -163,20 +174,17 @@ def deploy_branch(branch: str):
             pass
         return None, f"合併失敗（可能有衝突，已 abort）：{e}", branch, None
     # push
-    p = subprocess.run(["git", "-C", WORKSPACE, "push", "origin", "main"], capture_output=True, text=True)
+    p = subprocess.run(["git", "-C", WORKSPACE, "push", "origin", BASE_BRANCH], capture_output=True, text=True)
     if p.returncode != 0:
         return None, f"push 失敗：{(p.stderr or p.stdout)[:200]}", branch, None
-    # 部署到 LXC
-    deploy_cmd = ("cd ~/project-manager && git pull --ff-only && "
-                  "venv/bin/alembic upgrade head && systemctl restart project-manager && "
-                  "sleep 2 && systemctl is-active project-manager")
+    # 部署到遠端主機
     try:
-        p = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "lxc", deploy_cmd],
+        p = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", DEPLOY_SSH, DEPLOY_CMD],
                            capture_output=True, text=True, timeout=180)
     except subprocess.TimeoutExpired:
-        return None, "LXC 部署逾時", branch, None
+        return None, f"{DEPLOY_SSH} 部署逾時", branch, None
     if p.returncode != 0:
-        return None, f"LXC 部署失敗：{(p.stderr or p.stdout)[:300]}", branch, None
+        return None, f"{DEPLOY_SSH} 部署失敗：{(p.stderr or p.stdout)[:300]}", branch, None
     # 清掉本機已合併分支
     try:
         git("branch", "-d", branch)
@@ -207,7 +215,8 @@ def main():
     log(f"BMO worker 啟動：API={API_BASE} workspace={WORKSPACE} poll={POLL}s")
     while True:
         try:
-            r = requests.get(f"{API_BASE}/api/bmo/jobs/queued", headers=HEADERS, timeout=15)
+            r = requests.get(f"{API_BASE}/api/bmo/jobs/queued",
+                             params={"workspace": WORKSPACE_KEY}, headers=HEADERS, timeout=15)
             if r.status_code == 200:
                 for job in r.json():
                     process(job)

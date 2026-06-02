@@ -29,6 +29,10 @@ router = APIRouter(prefix="/bmo", tags=["bmo"])
 logger = logging.getLogger(__name__)
 
 WORKER_TOKEN = os.getenv("BMO_WORKER_TOKEN", "")
+# 可派工的 workspace（repo）清單；每個由一個 worker 認領
+WORKSPACES = [w.strip() for w in os.getenv("BMO_WORKSPACES", "project-manager,stock_quant").split(",") if w.strip()]
+WORKSPACE_LABELS = {"project-manager": "專案管理器", "stock_quant": "Stocker"}
+DEFAULT_WORKSPACE = WORKSPACES[0] if WORKSPACES else "project-manager"
 # 只有這些 LINE userId 能派工（逗號分隔）；留空＝不限制（僅供測試）
 ALLOWED_USERS = [u.strip() for u in os.getenv("BMO_ALLOWED_USERS", "").split(",") if u.strip()]
 # LINE Login channel id，用來驗證 LIFF 的 id_token（= LIFF_ID 的前綴數字）
@@ -107,6 +111,7 @@ def _check_user(id_token: Optional[str]):
 class JobCreate(BaseModel):
     prompt: str
     task_id: Optional[int] = None
+    workspace: Optional[str] = None
     id_token: Optional[str] = None
 
 class JobComment(BaseModel):
@@ -129,6 +134,7 @@ class JobOut(BaseModel):
     id: int
     prompt: str
     kind: str = "task"
+    workspace: str = "project-manager"
     task_id: Optional[int] = None
     parent_id: Optional[int] = None
     branch: Optional[str] = None
@@ -144,12 +150,19 @@ class JobOut(BaseModel):
 
 
 # --- 建立 / 查詢（給 LIFF）---
+@router.get("/workspaces")
+def list_workspaces():
+    """可派工的 workspace 清單，供 LIFF 派工時選擇。"""
+    return [{"key": w, "label": WORKSPACE_LABELS.get(w, w)} for w in WORKSPACES]
+
+
 @router.post("/jobs", response_model=JobOut, status_code=201)
 def create_job(data: JobCreate, db: Session = Depends(get_db)):
     if not data.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt is empty")
     _check_user(data.id_token)
-    job = BmoJob(prompt=data.prompt.strip(), task_id=data.task_id, status="queued")
+    ws = data.workspace if data.workspace in WORKSPACES else DEFAULT_WORKSPACE
+    job = BmoJob(prompt=data.prompt.strip(), task_id=data.task_id, status="queued", workspace=ws)
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -173,7 +186,7 @@ def comment_job(job_id: int, data: JobComment, db: Session = Depends(get_db)):
         f"請閱讀我的 comment，判斷是否需要進一步修改；若需要就在同一分支上修改。"
     )
     job = BmoJob(prompt=prompt, task_id=parent.task_id, parent_id=parent.id,
-                 branch=parent.branch, status="queued")
+                 branch=parent.branch, status="queued", workspace=parent.workspace)
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -190,7 +203,8 @@ def deploy_job(job_id: int, data: JobDeploy, db: Session = Depends(get_db)):
     if not src.branch:
         raise HTTPException(status_code=400, detail="此任務沒有可部署的分支")
     job = BmoJob(prompt=f"合併並部署分支 {src.branch}", kind="deploy",
-                 task_id=src.task_id, parent_id=src.id, branch=src.branch, status="queued")
+                 task_id=src.task_id, parent_id=src.id, branch=src.branch, status="queued",
+                 workspace=src.workspace)
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -228,9 +242,14 @@ def archive_job(job_id: int, data: JobArchive | None = None, db: Session = Depen
 
 # --- worker 專用 ---
 @router.get("/jobs/queued", response_model=List[JobOut])
-def queued_jobs(x_worker_token: Optional[str] = Header(None), db: Session = Depends(get_db)):
+def queued_jobs(workspace: Optional[str] = None,
+                x_worker_token: Optional[str] = Header(None), db: Session = Depends(get_db)):
     _require_worker(x_worker_token)
-    return db.query(BmoJob).filter(BmoJob.status == "queued").order_by(BmoJob.id.asc()).all()
+    q = db.query(BmoJob).filter(BmoJob.status == "queued")
+    # worker 只認領自己 workspace 的 job；未指定 workspace 的舊 worker 看全部（相容）
+    if workspace:
+        q = q.filter(BmoJob.workspace == workspace)
+    return q.order_by(BmoJob.id.asc()).all()
 
 
 @router.post("/jobs/{job_id}/claim", response_model=JobOut)
