@@ -919,6 +919,12 @@ function renderCodeUsage(cu) {
     <div class="usage-pct" style="color:${color}">${pct}%</div>
     <div class="usage-bar"><div class="usage-fill" style="width:${pct}%;background:${color}"></div></div>
     ${resetTxt ? `<div class="usage-reset">⏱ ${resetTxt}</div>` : ''}
+    ${cu.daily_budget ? (() => {
+      const dpct = cu.daily_pct || 0;
+      const dcolor = dpct>=90 ? '#e53935' : dpct>=70 ? '#e36209' : '#06C755';
+      return `<div class="usage-reset" style="margin-top:8px">今日用量 ${dpct}%（${fmtNum(cu.daily_used)} / ${fmtNum(cu.daily_budget)} token）</div>
+      <div class="usage-bar"><div class="usage-fill" style="width:${dpct}%;background:${dcolor}"></div></div>`;
+    })() : ''}
     ${items.map(i => `
       <div class="tok-row">
         <span class="tok-label">${i.k}</span>

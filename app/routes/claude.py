@@ -6,6 +6,8 @@ import os
 
 # 5 小時視窗 output token 預算（與 LINE 顯示一致，可用環境變數覆蓋）
 CODE_WINDOW_OUTPUT_BUDGET = int(os.getenv("CODE_WINDOW_OUTPUT_BUDGET", "500000"))
+# 每日可用最大 token（今日用量百分比的分母，可用環境變數覆蓋）
+DAILY_TOKEN_BUDGET = int(os.getenv("DAILY_TOKEN_BUDGET", "2000000"))
 
 from app.database import get_db
 from app.models.claude_usage import ClaudeSession, RateLimitEvent, ResumeQueue, CodeUsageReport
@@ -60,6 +62,9 @@ def get_code_usage(db: Session = Depends(get_db)):
         return {"available": False}
     used = report.window_5h_output or 0
     usage_pct = min(100, int(used / CODE_WINDOW_OUTPUT_BUDGET * 100)) if CODE_WINDOW_OUTPUT_BUDGET else 0
+    # 今日總 token（輸入＋輸出）÷ 每日可用最大 token
+    daily_used = (report.today_input or 0) + (report.today_output or 0)
+    daily_pct = min(100, int(daily_used / DAILY_TOKEN_BUDGET * 100)) if DAILY_TOKEN_BUDGET else 0
     # 視窗重置時間 = 視窗內最早訊息 + 5 小時
     reset_at = None
     if report.window_earliest:
@@ -77,6 +82,9 @@ def get_code_usage(db: Session = Depends(get_db)):
         },
         "output_budget": CODE_WINDOW_OUTPUT_BUDGET,
         "usage_pct": usage_pct,
+        "daily_budget": DAILY_TOKEN_BUDGET,
+        "daily_used": daily_used,
+        "daily_pct": daily_pct,
         "window_reset_at": reset_at,
         "today": {
             "input": report.today_input,
