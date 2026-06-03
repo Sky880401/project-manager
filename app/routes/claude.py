@@ -47,12 +47,44 @@ class CodeUsageIn(BaseModel):
 
 @router.post("/code-usage")
 def report_code_usage(data: CodeUsageIn, db: Session = Depends(get_db)):
-    # 只保留最新一筆，刪除舊的
+    # token 用量由 hook 解析 transcript 回報；/usage 的真實額度百分比無法從 transcript 取得，
+    # 故沿用舊紀錄裡的 session_pct / weekly_pct，避免被覆寫清空。
+    old = db.query(CodeUsageReport).order_by(CodeUsageReport.reported_at.desc()).first()
+    session_pct = old.session_pct if old else None
+    weekly_pct = old.weekly_pct if old else None
+    usage_reported_at = old.usage_reported_at if old else None
     db.query(CodeUsageReport).delete()
-    report = CodeUsageReport(**data.model_dump())
+    report = CodeUsageReport(
+        **data.model_dump(),
+        session_pct=session_pct,
+        weekly_pct=weekly_pct,
+        usage_reported_at=usage_reported_at,
+    )
     db.add(report)
     db.commit()
     return {"status": "ok"}
+
+
+class UsageLimitIn(BaseModel):
+    session_pct: int | None = None  # /usage 顯示的 5 小時 session 用量 %
+    weekly_pct: int | None = None   # /usage 顯示的當周用量 %
+
+
+@router.post("/usage-limit")
+def report_usage_limit(data: UsageLimitIn, db: Session = Depends(get_db)):
+    """回報 Claude Code /usage 的真實額度百分比。
+    無法從 transcript 推算，需從 /usage 畫面手動回報。"""
+    report = db.query(CodeUsageReport).order_by(CodeUsageReport.reported_at.desc()).first()
+    if not report:
+        report = CodeUsageReport()
+        db.add(report)
+    if data.session_pct is not None:
+        report.session_pct = data.session_pct
+    if data.weekly_pct is not None:
+        report.weekly_pct = data.weekly_pct
+    report.usage_reported_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"status": "ok", "session_pct": report.session_pct, "weekly_pct": report.weekly_pct}
 
 
 @router.get("/code-usage")
@@ -92,6 +124,10 @@ def get_code_usage(db: Session = Depends(get_db)):
             "messages": report.today_messages,
         },
         "current_model": report.current_model,
+        # 來自 /usage 的真實額度百分比（優先顯示，沒有才退回 token 估算）
+        "session_pct": report.session_pct,
+        "weekly_pct": report.weekly_pct,
+        "usage_reported_at": report.usage_reported_at.isoformat() if report.usage_reported_at else None,
         "reported_at": report.reported_at.isoformat() if report.reported_at else None,
     }
 
