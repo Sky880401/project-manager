@@ -10,6 +10,7 @@ class TaskBase(BaseModel):
     description: Optional[str] = None
     milestone_id: Optional[int] = None
     priority: Optional[TaskPriority] = TaskPriority.medium
+    auto_solve: Optional[bool] = False
     order: Optional[int] = 0
 
 class TaskCreate(TaskBase):
@@ -22,6 +23,7 @@ class TaskUpdate(BaseModel):
     priority: Optional[TaskPriority] = None
     milestone_id: Optional[int] = None
     checkpoint: Optional[str] = None
+    auto_solve: Optional[bool] = None
     order: Optional[int] = None
 
 class TaskOut(TaskBase):
