@@ -1,7 +1,7 @@
 """add auto_solve to tasks
 
 Revision ID: d1e2f3a4b5c6
-Revises: f7a8b9c0d1e2
+Revises: c9d8e7f60001
 Create Date: 2026-06-04 00:00:00.000000
 
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision: str = 'd1e2f3a4b5c6'
-down_revision: Union[str, None] = 'f7a8b9c0d1e2'
+down_revision: Union[str, None] = 'c9d8e7f60001'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
