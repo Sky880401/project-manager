@@ -910,14 +910,35 @@ function renderCodeUsage(cu) {
     else resetTxt = '額度已釋放';
   }
   const t = cu.today || {};
+  // 真實額度：優先用 /usage 回報的 session_pct / weekly_pct，沒有才退回 token 估算
+  const hasReal = cu.session_pct != null || cu.weekly_pct != null;
+  const sPct = cu.session_pct != null ? cu.session_pct : pct;
+  const sColor = sPct>=90 ? '#e53935' : sPct>=70 ? '#e36209' : '#06C755';
+  const realBlock = hasReal ? (() => {
+    let blocks = '';
+    if (cu.session_pct != null) {
+      blocks += `<div class="usage-reset" style="margin-top:10px">5 小時 session 用量 ${cu.session_pct}%</div>
+        <div class="usage-bar"><div class="usage-fill" style="width:${cu.session_pct}%;background:${sColor}"></div></div>`;
+    }
+    if (cu.weekly_pct != null) {
+      const wc = cu.weekly_pct>=90 ? '#e53935' : cu.weekly_pct>=70 ? '#e36209' : '#06C755';
+      blocks += `<div class="usage-reset" style="margin-top:8px">當周用量 ${cu.weekly_pct}%</div>
+        <div class="usage-bar"><div class="usage-fill" style="width:${cu.weekly_pct}%;background:${wc}"></div></div>`;
+    }
+    if (cu.usage_reported_at) {
+      blocks += `<div class="usage-reset" style="opacity:.7;margin-top:6px">額度數據回報於 ${new Date(cu.usage_reported_at).toLocaleString('zh-TW',{hour12:false})}</div>`;
+    }
+    return blocks;
+  })() : '';
   return `
   <div class="usage-card">
     <div class="usage-head">
-      <span class="usage-title">🖥 Claude Code 額度（5 小時視窗）</span>
+      <span class="usage-title">🖥 Claude Code 額度${hasReal ? '（/usage 真實額度）' : '（token 估算）'}</span>
       ${cu.current_model ? `<span class="usage-model">${esc(cu.current_model)}</span>` : ''}
     </div>
+    ${hasReal ? realBlock : `
     <div class="usage-pct" style="color:${color}">${pct}%</div>
-    <div class="usage-bar"><div class="usage-fill" style="width:${pct}%;background:${color}"></div></div>
+    <div class="usage-bar"><div class="usage-fill" style="width:${pct}%;background:${color}"></div></div>`}
     ${resetTxt ? `<div class="usage-reset">⏱ ${resetTxt}</div>` : ''}
     ${cu.daily_budget ? (() => {
       const dpct = cu.daily_pct || 0;

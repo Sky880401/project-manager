@@ -47,6 +47,10 @@ class CodeUsageReport(Base):
     today_messages = Column(Integer, default=0)
     window_earliest = Column(DateTime(timezone=True), nullable=True)
     current_model = Column(String(100), nullable=True)  # 最近一次使用的模型 id
+    # 來自 Claude Code /usage 的真實額度百分比（無法從 transcript 推算，需手動回報）
+    session_pct = Column(Integer, nullable=True)         # 5 小時 session 用量 %
+    weekly_pct = Column(Integer, nullable=True)          # 當周用量 %
+    usage_reported_at = Column(DateTime(timezone=True), nullable=True)  # /usage 最後回報時間
     reported_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
