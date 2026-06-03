@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, Enum, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, Enum, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import enum
@@ -75,6 +75,8 @@ class Task(Base):
     status = Column(Enum(TaskStatus), default=TaskStatus.todo)
     priority = Column(Enum(TaskPriority), default=TaskPriority.medium, nullable=False)
     checkpoint = Column(Text)
+    # 標注為可自行解決：BMO 在有 token 時會自動派工處理
+    auto_solve = Column(Boolean, default=False, nullable=False)
     order = Column(Integer, default=0)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

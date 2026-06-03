@@ -37,6 +37,9 @@ DEFAULT_WORKSPACE = WORKSPACES[0] if WORKSPACES else "project-manager"
 ALLOWED_USERS = [u.strip() for u in os.getenv("BMO_ALLOWED_USERS", "").split(",") if u.strip()]
 # LINE Login channel id，用來驗證 LIFF 的 id_token（= LIFF_ID 的前綴數字）
 LINE_CHANNEL_ID = os.getenv("BMO_LINE_CHANNEL_ID", "")
+# 網頁版（桌機瀏覽器）後門：LIFF 在外部瀏覽器常拿不到 id_token，
+# 改用此密碼讓本人在網頁上也能 comment/派工。留空＝不啟用網頁授權。
+WEB_TOKEN = os.getenv("BMO_WEB_TOKEN", "")
 
 
 def _verify_line_user(id_token: str | None) -> str | None:
@@ -100,11 +103,15 @@ def _require_worker(token: Optional[str]):
         raise HTTPException(status_code=401, detail="invalid worker token")
 
 
-def _check_user(id_token: Optional[str]):
-    if ALLOWED_USERS:
-        sub = _verify_line_user(id_token)
-        if sub not in ALLOWED_USERS:
-            raise HTTPException(status_code=403, detail="只有授權的 LINE 帳號能派工給 BMO")
+def _check_user(id_token: Optional[str], web_token: Optional[str] = None):
+    if not ALLOWED_USERS:
+        return
+    # 網頁版授權：帶對的 BMO_WEB_TOKEN 即視為本人（桌機瀏覽器拿不到 id_token 時用）
+    if WEB_TOKEN and web_token and web_token == WEB_TOKEN:
+        return
+    sub = _verify_line_user(id_token)
+    if sub not in ALLOWED_USERS:
+        raise HTTPException(status_code=403, detail="只有授權的 LINE 帳號能派工給 BMO")
 
 
 # --- Schemas ---
@@ -113,13 +120,16 @@ class JobCreate(BaseModel):
     task_id: Optional[int] = None
     workspace: Optional[str] = None
     id_token: Optional[str] = None
+    web_token: Optional[str] = None
 
 class JobComment(BaseModel):
     comment: str
     id_token: Optional[str] = None
+    web_token: Optional[str] = None
 
 class JobArchive(BaseModel):
     id_token: Optional[str] = None
+    web_token: Optional[str] = None
 
 class JobComplete(BaseModel):
     result: Optional[str] = None
@@ -129,6 +139,7 @@ class JobComplete(BaseModel):
 
 class JobDeploy(BaseModel):
     id_token: Optional[str] = None
+    web_token: Optional[str] = None
 
 class JobOut(BaseModel):
     id: int
@@ -219,7 +230,7 @@ def bmo_stats(days: int = 14, db: Session = Depends(get_db)):
 def create_job(data: JobCreate, db: Session = Depends(get_db)):
     if not data.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt is empty")
-    _check_user(data.id_token)
+    _check_user(data.id_token, data.web_token)
     ws = data.workspace if data.workspace in WORKSPACES else DEFAULT_WORKSPACE
     job = BmoJob(prompt=data.prompt.strip(), task_id=data.task_id, status="queued", workspace=ws)
     db.add(job)
@@ -233,7 +244,7 @@ def comment_job(job_id: int, data: JobComment, db: Session = Depends(get_db)):
     """對某個已完成 job 的變更下 review comment，建立沿用同分支的後續 job。"""
     if not data.comment.strip():
         raise HTTPException(status_code=400, detail="comment is empty")
-    _check_user(data.id_token)
+    _check_user(data.id_token, data.web_token)
     parent = db.query(BmoJob).filter(BmoJob.id == job_id).first()
     if not parent:
         raise HTTPException(status_code=404, detail="job not found")
@@ -269,7 +280,7 @@ def comment_job(job_id: int, data: JobComment, db: Session = Depends(get_db)):
 @router.post("/jobs/{job_id}/deploy", response_model=JobOut, status_code=201)
 def deploy_job(job_id: int, data: JobDeploy, db: Session = Depends(get_db)):
     """一鍵合併+部署：建立一個 kind=deploy 的 job，worker 會把該分支合併進 main 並部署。"""
-    _check_user(data.id_token)
+    _check_user(data.id_token, data.web_token)
     src = db.query(BmoJob).filter(BmoJob.id == job_id).first()
     if not src:
         raise HTTPException(status_code=404, detail="job not found")
@@ -296,7 +307,7 @@ def list_jobs(limit: int = 20, include_archived: bool = False, db: Session = Dep
 def archive_job(job_id: int, data: JobArchive | None = None, db: Session = Depends(get_db)):
     """使用者標注完成：隱藏此 job，並把來源任務標記為 completed（從待辦移除）。"""
     if data is not None:
-        _check_user(data.id_token)
+        _check_user(data.id_token, data.web_token)
     job = db.query(BmoJob).filter(BmoJob.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
@@ -311,6 +322,50 @@ def archive_job(job_id: int, data: JobArchive | None = None, db: Session = Depen
     db.commit()
     db.refresh(job)
     return job
+
+
+# --- 自動解決（auto-solve）---
+@router.post("/auto-dispatch", response_model=List[JobOut])
+def auto_dispatch(workspace: Optional[str] = None,
+                  x_worker_token: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    """worker 在「還有 token」時呼叫：把標注 auto_solve 的待辦任務自動派工。
+
+    只挑 status=todo 且 auto_solve=True 的任務；若該任務已有未封存（archived=False）
+    的 job 在處理或待 review，就略過，避免重複派工。新建的 job 會出現在 BMO 標籤頁，
+    使用者再對結果下 comment 即可。
+    """
+    _require_worker(x_worker_token)
+    from app.models.project import Task, TaskStatus
+
+    q = db.query(Task).filter(
+        Task.deleted_at.is_(None),
+        Task.auto_solve.is_(True),
+        Task.status == TaskStatus.todo,
+    )
+    tasks = q.order_by(Task.id.asc()).all()
+
+    created = []
+    for t in tasks:
+        # 已有未封存的 job 對應這個任務就跳過（處理中或等待 review）
+        busy = db.query(BmoJob).filter(
+            BmoJob.task_id == t.id,
+            BmoJob.archived == False,  # noqa: E712
+        ).first()
+        if busy:
+            continue
+        ws = workspace if workspace in WORKSPACES else DEFAULT_WORKSPACE
+        prompt = f"{t.title}\n\n{t.description}" if t.description else t.title
+        job = BmoJob(prompt=prompt.strip(), task_id=t.id, status="queued",
+                     workspace=ws, kind="task")
+        db.add(job)
+        # 標記為進行中，避免下次重複掃到（job 完成後使用者 review 再決定）
+        t.status = TaskStatus.in_progress
+        db.flush()
+        created.append(job)
+    db.commit()
+    for j in created:
+        db.refresh(j)
+    return created
 
 
 # --- worker 專用 ---

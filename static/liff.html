@@ -741,6 +741,10 @@ async function showEditTask(projectId, taskId) {
     <div class="field"><label>描述（選填）</label>
       <textarea id="et-desc" rows="3" style="resize:vertical;font-family:inherit">${esc(t.description||'')}</textarea>
     </div>
+    <label style="display:flex;align-items:center;gap:8px;margin:4px 0 12px;font-size:14px;cursor:pointer">
+      <input type="checkbox" id="et-autosolve" ${t.auto_solve ? 'checked' : ''}>
+      🤖 可自行解決（BMO 有 token 時自動處理，完成後在 BMO 頁等你 comment）
+    </label>
     <button class="sheet-btn" onclick="saveTask(${projectId},${taskId})">儲存</button>
     <div class="field admin-only" style="margin-top:8px"><label>派給哪個專案執行</label>
       <select id="et-workspace" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit">
@@ -758,13 +762,14 @@ async function dispatchBmo(projectId, taskId) {
   const prompt = desc ? `${title}\n\n${desc}` : title;
   const wsEl = document.getElementById('et-workspace');
   const workspace = wsEl ? wsEl.value : undefined;
-  let id_token = null;
-  try { id_token = liff.getIDToken(); } catch(_) {}
   const res = await fetch(API + '/api/bmo/jobs', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({prompt, task_id: taskId, workspace, id_token}),
+    body: JSON.stringify(authBody({prompt, task_id: taskId, workspace})),
   });
-  if (res.status === 403) { toast('未授權：只有你本人能派工'); return; }
+  if (res.status === 403) {
+    if (promptWebToken()) return dispatchBmo(projectId, taskId);
+    toast('未授權：只有你本人能派工'); return;
+  }
   if (!res.ok) { toast('派工失敗'); return; }
   closeSheetForce();
   toast('已派給 BMO 執行 🤖');
@@ -773,8 +778,10 @@ async function dispatchBmo(projectId, taskId) {
 async function saveTask(projectId, taskId) {
   const title = document.getElementById('et-title').value.trim();
   if (!title) return;
+  const autoEl = document.getElementById('et-autosolve');
   await api(`/api/projects/${projectId}/tasks/${taskId}`, {method:'PATCH', body:{
-    title, description: document.getElementById('et-desc').value
+    title, description: document.getElementById('et-desc').value,
+    auto_solve: autoEl ? autoEl.checked : undefined
   }});
   closeSheetForce();
   toast('任務已更新');
@@ -1004,25 +1011,28 @@ async function loadBmo() {
 
 async function deployBmo(jobId) {
   if (!confirm('確定要把這個分支合併進 main 並部署到正式站？')) return;
-  let id_token = null;
-  try { id_token = liff.getIDToken(); } catch(_) {}
   const res = await fetch(API + `/api/bmo/jobs/${jobId}/deploy`, {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({id_token}),
+    body: JSON.stringify(authBody()),
   });
-  if (res.status === 403) { toast('未授權：只有你本人能部署'); return; }
+  if (res.status === 403) {
+    if (promptWebToken()) return deployBmo(jobId);
+    toast('未授權：只有你本人能部署'); return;
+  }
   if (!res.ok) { toast('送出失敗'); return; }
   toast('已排程合併+部署 🚀，完成會 LINE 通知');
   loadBmo();
 }
 
 async function archiveBmo(jobId) {
-  let id_token = null;
-  try { id_token = liff.getIDToken(); } catch(_) {}
   const res = await fetch(API + `/api/bmo/jobs/${jobId}/archive`, {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({id_token}),
+    body: JSON.stringify(authBody()),
   });
+  if (res.status === 403) {
+    if (promptWebToken()) return archiveBmo(jobId);
+    toast('未授權：只有你本人能操作'); return;
+  }
   if (!res.ok) { toast('操作失敗'); return; }
   toast('已標注完成，已從待辦與 BMO 隱藏 ✅');
   loadBmo();
@@ -1030,17 +1040,33 @@ async function archiveBmo(jobId) {
   loadDashboard();
 }
 
+// 取得授權資訊：LINE 內用 id_token；桌機網頁版拿不到 id_token 時，
+// 改用存在 localStorage 的網頁通行碼（BMO_WEB_TOKEN）。
+function authBody(extra) {
+  let id_token = null;
+  try { id_token = liff.getIDToken(); } catch(_) {}
+  const web_token = localStorage.getItem('bmo_web_token') || null;
+  return Object.assign({ id_token, web_token }, extra || {});
+}
+// 在網頁版被擋（403）時，詢問一次通行碼存起來，下次就不用再問。
+function promptWebToken() {
+  const t = prompt('網頁版需要通行碼才能操作（向管理者索取）');
+  if (t) { localStorage.setItem('bmo_web_token', t.trim()); return true; }
+  return false;
+}
+
 async function commentBmo(jobId) {
   const ta = document.getElementById('cmt-' + jobId);
   const comment = (ta?.value || '').trim();
   if (!comment) { toast('請先輸入 comment'); return; }
-  let id_token = null;
-  try { id_token = liff.getIDToken(); } catch(_) {}
   const res = await fetch(API + `/api/bmo/jobs/${jobId}/comment`, {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({comment, id_token}),
+    body: JSON.stringify(authBody({comment})),
   });
-  if (res.status === 403) { toast('未授權：只有你本人能派工'); return; }
+  if (res.status === 403) {
+    if (promptWebToken()) return commentBmo(jobId);
+    toast('未授權：只有你本人能 comment'); return;
+  }
   if (!res.ok) { toast('送出失敗'); return; }
   toast('已回傳給 BMO，將在同分支繼續 🤖');
   loadBmo();
