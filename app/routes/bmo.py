@@ -238,11 +238,25 @@ def comment_job(job_id: int, data: JobComment, db: Session = Depends(get_db)):
     if not parent:
         raise HTTPException(status_code=404, detail="job not found")
 
+    # 追到這條 review 鏈的根任務，取得「原始需求」（claude -p 無記憶，必須把上下文帶齊）
+    root = parent
+    seen = set()
+    while root.parent_id and root.parent_id not in seen:
+        seen.add(root.id)
+        p = db.query(BmoJob).filter(BmoJob.id == root.parent_id).first()
+        if not p:
+            break
+        root = p
+    original = (root.prompt or "").strip()[:1500]
+    prev_result = (parent.result or parent.error or "(上一輪無輸出)").strip()[:2500]
+
     prompt = (
-        f"這是延續任務 #{parent.id} 的修改。你上一輪在分支 `{parent.branch}` 做的變更（diff）：\n"
-        f"```\n{(parent.diff or '(無)')[:6000]}\n```\n\n"
-        f"我對上述變更的 review comment：\n{data.comment.strip()}\n\n"
-        f"請閱讀我的 comment，判斷是否需要進一步修改；若需要就在同一分支上修改。"
+        f"【原始任務 #{root.id}】\n{original}\n\n"
+        f"【你上一輪（#{parent.id}）的回覆】\n{prev_result}\n\n"
+        f"【你上一輪的程式碼變更 diff】\n```\n{(parent.diff or '(無，未改檔)')[:5000]}\n```\n\n"
+        f"【我的新 comment】\n{data.comment.strip()}\n\n"
+        f"請依「原始任務 + 我的 comment」在同一分支 `{parent.branch}` 上實際動工"
+        f"（若需改檔就改檔、產生 diff），完成後簡短回報。"
     )
     job = BmoJob(prompt=prompt, task_id=parent.task_id, parent_id=parent.id,
                  branch=parent.branch, status="queued", workspace=parent.workspace)
