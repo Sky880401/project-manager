@@ -503,33 +503,47 @@ async function loadDashboard() {
   let statsHTML = '';
   try {
     const stats = await api('/api/bmo/stats');
-    statsHTML = renderDevStats(stats);
+    statsHTML = renderDevStats(stats, projects);
   } catch(_) {}
 
   el.innerHTML = renderDashboard(projects) + statsHTML + redHTML + yellowHTML;
 }
 
-// 專案資源使用量（各專案累計變更量）＋ 每日開發量（近 14 天 job 數）長條圖
-function renderDevStats(stats) {
-  const res = (stats && stats.resources) || [];
+// 各專案當日使用量（分母＝當日總 task；綠＝當日完成、藍＝進行中）＋ 每日開發量長條圖
+function renderDevStats(stats, projects) {
   const daily = (stats && stats.daily) || [];
-  const palette = ['#06C755','#0366d6','#f0883e','#a371f7','#e5534b','#1f883d'];
   // 以平方根比例縮放：避免單一大值把其餘小值壓成同樣的細條（21 與 17 看起來一樣高的 bug）。
   // 值為 0 時回傳 0；非 0 時給最小 6% 讓它看得見，且彼此仍可分辨。
   const scaleW = (v, max) => v > 0 ? Math.max(6, Math.round(Math.sqrt(v / max) * 100)) : 0;
 
-  // 資源使用量：橫向長條，依變更行數（無 diff 行數時退而用 job 次數，避免全部為 0 同樣長）
-  const useJobs = res.every(r => !r.lines);
-  const maxRes = Math.max(1, ...res.map(r => useJobs ? r.jobs : r.lines));
-  const resBars = res.length ? res.map((r,i) => {
-    const w = scaleW(useJobs ? r.jobs : r.lines, maxRes);
-    const color = palette[i % palette.length];
+  // 當日使用量：分母為「當日總 task」（各專案當日完成＋進行中之總和）。
+  // 每條 = 該專案佔當日總 task 的比例，綠色為當日完成、藍色為進行中。
+  const todayKey = new Date().toLocaleDateString('sv');  // YYYY-MM-DD（本地時區）
+  const isToday = ts => ts && new Date(ts).toLocaleDateString('sv') === todayKey;
+  const perProj = (projects || []).map(p => {
+    let done = 0, prog = 0;
+    for (const t of (p.tasks || [])) {
+      if (t.status === 'completed' && isToday(t.updated_at)) done++;
+      else if (t.status === 'in_progress') prog++;
+    }
+    return {name: p.name, done, prog, total: done + prog};
+  }).filter(p => p.total > 0).sort((a,b) => b.total - a.total);
+
+  const grand = perProj.reduce((s,p) => s + p.total, 0);
+  const resBars = grand ? perProj.map(p => {
+    const w = Math.round(p.total / grand * 100);          // 該專案佔當日總 task 的比例
+    const gw = p.total ? Math.round(p.done / p.total * 100) : 0;  // 綠色（完成）佔本條比例
     return `<div class="bar-row">
-      <div class="bar-label">${esc(r.label)}</div>
-      <div class="bar-track"><div class="bar-fill" style="width:${w}%;background:${color}"></div></div>
-      <div class="bar-val">${r.lines}行 / ${r.jobs}次</div>
+      <div class="bar-label">${esc(p.name)}</div>
+      <div class="bar-track" style="display:flex">
+        <div class="bar-fill" style="width:${w}%;display:flex">
+          <span style="width:${gw}%;background:#06C755"></span>
+          <span style="width:${100-gw}%;background:#0366d6"></span>
+        </div>
+      </div>
+      <div class="bar-val">完成${p.done} / 進行${p.prog}</div>
     </div>`;
-  }).join('') : '<div class="status-sub" style="padding:8px 0">尚無開發紀錄</div>';
+  }).join('') : '<div class="status-sub" style="padding:8px 0">今日尚無任務進度</div>';
 
   // 每日開發量：直向長條
   const maxC = Math.max(1, ...daily.map(d => d.count));
@@ -545,7 +559,11 @@ function renderDevStats(stats) {
 
   return `
   <div class="dashboard" style="margin-top:12px">
-    <div class="dash-title">🧩 各專案資源使用量</div>
+    <div class="dash-title">🧩 各專案當日使用量</div>
+    <div style="display:flex;gap:14px;font-size:11px;color:var(--muted);margin:2px 0 10px">
+      <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#06C755;margin-right:4px"></span>當日完成</span>
+      <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#0366d6;margin-right:4px"></span>進行中</span>
+    </div>
     <div class="bar-list">${resBars}</div>
     <div class="dash-title" style="margin-top:18px">📈 每日開發量（近 14 天）</div>
     <div class="col-chart">${cols}</div>
