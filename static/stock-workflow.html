@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>股票查詢後台工作流程</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;
+         background:#0f1115; color:#e6e6e6; line-height:1.6; padding:20px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:#8a93a2; font-size:13px; margin-bottom:20px; }
+  .step { background:#1a1e26; border:1px solid #272d39; border-radius:14px;
+          padding:14px 16px; margin:0 0 12px; position:relative; }
+  .step .n { display:inline-block; background:#3b82f6; color:#fff; font-weight:700;
+             border-radius:50%; width:26px; height:26px; text-align:center; line-height:26px;
+             margin-right:8px; font-size:14px; }
+  .step h2 { font-size:15px; margin:0 0 6px; display:flex; align-items:center; }
+  .step p { margin:4px 0; font-size:13.5px; color:#c4cbd6; }
+  .step code { background:#0d1017; padding:1px 6px; border-radius:6px; color:#7dd3fc; font-size:12.5px; }
+  .arrow { text-align:center; color:#4b5563; font-size:18px; margin:-6px 0 6px; }
+  .tag { display:inline-block; font-size:11px; padding:2px 8px; border-radius:20px; margin-left:6px; }
+  .tag.dc { background:#5865F2; color:#fff; }
+  .tag.ai { background:#10b981; color:#fff; }
+  .tag.calc{ background:#f59e0b; color:#111; }
+  .note { background:#231a1a; border:1px solid #4d2f2f; border-radius:14px; padding:14px 16px; margin-top:18px; }
+  .note h2 { font-size:15px; margin:0 0 6px; color:#fca5a5; }
+  .note p { font-size:13px; color:#e0c7c7; margin:6px 0; }
+  .ok { color:#86efac; }
+</style>
+</head>
+<body>
+  <h1>📊 股票查詢後台工作流程</h1>
+  <div class="sub">從 Discord 輸入 <code>!a 2330</code> 到收到診斷的完整流程（程式：stock_quant/discord_runner.py）</div>
+
+  <div class="step">
+    <h2><span class="n">1</span>你在 Discord 下指令 <span class="tag dc">Discord</span></h2>
+    <p>輸入 <code>!a 2330</code> 或 <code>!a 台積電</code>。Bot 用 <code>resolve_ticker_info()</code> 把代號／股名解析成正式代號（如 <code>2330.TW</code>）。</p>
+  </div>
+  <div class="arrow">▼</div>
+
+  <div class="step">
+    <h2><span class="n">2</span>額度檢查 + 確認按鈕</h2>
+    <p>依你的身分組（Admin／Premium／BETA／free）用 <code>check_quota_status()</code> 算今日剩餘次數。</p>
+    <p>跳出「✅ 確認分析 / ❌ 取消」按鈕，按確認才扣額度並開始運算（取消不扣）。</p>
+  </div>
+  <div class="arrow">▼</div>
+
+  <div class="step">
+    <h2><span class="n">3</span>抓資料 + 回測運算 <span class="tag calc">運算</span></h2>
+    <p><code>analyze_single_target()</code>：抓股價→跑多策略回測錦標賽（MA／RSI／MACD／KD／型態＋法人籌碼／ML）挑出主訊號，算出買賣建議、信心度、歷史 ROI。</p>
+    <p>同時用 <code>log_prediction()</code> 把這次判斷存檔，N 日後自動回填驗證命中率。</p>
+  </div>
+  <div class="arrow">▼</div>
+
+  <div class="step">
+    <h2><span class="n">4</span>AI 生成白話解讀 <span class="tag ai">NVIDIA AI</span></h2>
+    <p><code>generate_moltbot_prompt()</code> 把數據組成提示，丟給 <code>generate_insight()</code>（走 NVIDIA 模型，可用 <code>!model</code> 切換）產生白話分析。</p>
+  </div>
+  <div class="arrow">▼</div>
+
+  <div class="step">
+    <h2><span class="n">5</span>回傳結果（含圖）<span class="tag dc">Discord</span></h2>
+    <p><code>send_long()</code> 把「現價＋AI 解讀」分段送出，並把 K 線圖 <code>chart_path</code> 用 <code>discord.File</code> 當附件一起貼出。</p>
+    <p class="ok">✔ 圖片在 Discord 是直接附檔送出，沒問題。</p>
+  </div>
+
+  <div class="note">
+    <h2>⚠️ 關於「發圖片到 LINE」</h2>
+    <p>目前 stock_quant 的 LINE Bot（<code>line_bot.py</code>）只處理「意見回饋→開 GitHub Issue」，且只會回純文字（<code>TextSendMessage</code>）。<b>股票分析 <code>!a</code> 與 K 線圖只跑在 Discord，沒有接到 LINE。</b></p>
+    <p>LINE 技術上能發圖（<code>ImageMessage</code>），但前提是圖要有一個對外的 HTTPS 網址；現在 K 線圖只存本機檔案、沒有公開網址，所以無法直接推到 LINE。</p>
+    <p>要做的話有兩條路：1. 把 chart 上傳到可公開存取的網址再用 ImageMessage 推給 LINE；2. 維持現狀在 Discord 看圖、LINE 只收文字。要哪一個再跟我說，我才動程式。</p>
+  </div>
+</body>
+</html>
