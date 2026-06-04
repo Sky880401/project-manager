@@ -184,8 +184,14 @@ def ensure_single_alembic_head() -> str | None:
     LXC 端 `alembic upgrade head` 會以 'Multiple head revisions are present' 失敗。
     在 push 前就地收斂成單一 head，避免部署炸掉。回傳一句說明（有合併時）或 None。
     """
+    # 非 alembic 專案（如 stock_quant 沒有 alembic/ 目錄）直接略過，不要硬跑 alembic
+    if not os.path.isdir(os.path.join(WORKSPACE, "alembic")):
+        return None
     alembic = ALEMBIC_BIN if os.path.exists(ALEMBIC_BIN) else "alembic"
-    p = subprocess.run([alembic, "heads"], cwd=WORKSPACE, capture_output=True, text=True)
+    try:
+        p = subprocess.run([alembic, "heads"], cwd=WORKSPACE, capture_output=True, text=True)
+    except FileNotFoundError:
+        return None  # 找不到 alembic 執行檔（非本專案需求）→ 放行
     if p.returncode != 0:
         return None  # 查不動就放行，交給遠端部署照常處理／回報
     heads = [ln for ln in p.stdout.splitlines() if "(head)" in ln]
