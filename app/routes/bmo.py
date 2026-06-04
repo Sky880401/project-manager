@@ -35,6 +35,8 @@ WORKSPACE_LABELS = {"project-manager": "專案管理器", "stock_quant": "Stocke
 DEFAULT_WORKSPACE = WORKSPACES[0] if WORKSPACES else "project-manager"
 # 只有這些 LINE userId 能派工（逗號分隔）；留空＝不限制（僅供測試）
 ALLOWED_USERS = [u.strip() for u in os.getenv("BMO_ALLOWED_USERS", "").split(",") if u.strip()]
+# 管理者 LINE userId（逗號分隔）；可看見全域 BMO 統計等管理資料。與 projects.py 同一份設定。
+ADMIN_USERS = [u.strip() for u in os.getenv("BMO_ADMIN_USER", "").split(",") if u.strip()]
 # LINE Login channel id，用來驗證 LIFF 的 id_token（= LIFF_ID 的前綴數字）
 LINE_CHANNEL_ID = os.getenv("BMO_LINE_CHANNEL_ID", "")
 # 網頁版（桌機瀏覽器）後門：LIFF 在外部瀏覽器常拿不到 id_token，
@@ -179,14 +181,43 @@ def _diff_lines(diff: Optional[str]) -> int:
     return n
 
 
+def _is_admin_caller(
+    authorization: Optional[str],
+    x_line_id_token: Optional[str],
+    x_line_user_id: Optional[str],
+    x_guest_preview: Optional[str],
+) -> bool:
+    """與 projects.get_caller 同邏輯：無身分(桌機)或在 ADMIN_USERS 視為管理者；
+    X-Guest-Preview=1 時強制當一般使用者（前端預覽用）。"""
+    token = x_line_id_token
+    if not token and authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:]
+    owner_id = _verify_line_user(token) or x_line_user_id
+    if x_guest_preview == "1":
+        return False
+    return owner_id is None or owner_id in ADMIN_USERS
+
+
 @router.get("/stats")
-def bmo_stats(days: int = 14, db: Session = Depends(get_db)):
+def bmo_stats(
+    days: int = 14,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+    x_line_id_token: Optional[str] = Header(None),
+    x_line_user_id: Optional[str] = Header(None),
+    x_guest_preview: Optional[str] = Header(None),
+):
     """每個專案（workspace）的資源使用量與每日開發量，供 LIFF 圖表呈現。
 
     資源使用量：各 workspace 累計的 job 數與變更行數（diff +/- 行）。
     每日開發量：近 days 天，各 workspace 每天完成的 job 數。
+
+    ⚠️ 這是全域 BMO worker 開發統計（屬管理者個人開發量，不分專案 owner）；
+    一般使用者沒有 BMO 派工 → 回空資料，避免把管理者的開發量外洩給一般使用者。
     """
     from datetime import timedelta
+    if not _is_admin_caller(authorization, x_line_id_token, x_line_user_id, x_guest_preview):
+        return {"resources": [], "daily": []}
     jobs = db.query(BmoJob).all()
 
     # 各 workspace 累計資源使用量

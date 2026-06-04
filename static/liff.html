@@ -414,7 +414,8 @@ function loadAll() {
   loadDashboard();
   loadProjects();
   loadTasks();
-  loadClaude();
+  // Claude 分頁是管理者專屬（會牽涉 Sky 的 Claude 額度資料），一般使用者不載入。
+  if (!document.body.classList.contains('guest')) loadClaude();
 }
 
 // === Projects ===
@@ -519,17 +520,20 @@ async function loadDashboard() {
     : `<div class="section-title">🟡 黃燈任務</div>
        <div class="empty" style="padding:24px"><p>目前沒有黃燈任務 🎉</p></div>`;
 
+  // 「每日開發量」是 BMO worker 全域統計（管理者個人開發量），一般使用者不顯示，
+  // 只保留以自己專案算出的「各專案當日使用量」。
+  const isGuest = document.body.classList.contains('guest');
   let statsHTML = '';
   try {
-    const stats = await api('/api/bmo/stats');
-    statsHTML = renderDevStats(stats, projects);
+    const stats = isGuest ? null : await api('/api/bmo/stats');
+    statsHTML = renderDevStats(stats, projects, isGuest);
   } catch(_) {}
 
   el.innerHTML = renderDashboard(projects) + statsHTML + redHTML + yellowHTML;
 }
 
 // 各專案當日使用量（分母＝當日總 task；綠＝當日完成、藍＝進行中）＋ 每日開發量長條圖
-function renderDevStats(stats, projects) {
+function renderDevStats(stats, projects, isGuest) {
   const daily = (stats && stats.daily) || [];
   // 以平方根比例縮放：避免單一大值把其餘小值壓成同樣的細條（21 與 17 看起來一樣高的 bug）。
   // 值為 0 時回傳 0；非 0 時給最小 6% 讓它看得見，且彼此仍可分辨。
@@ -584,8 +588,9 @@ function renderDevStats(stats, projects) {
       <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#0366d6;margin-right:4px"></span>進行中</span>
     </div>
     <div class="bar-list">${resBars}</div>
+    ${isGuest ? '' : `
     <div class="dash-title" style="margin-top:18px">📈 每日開發量（近 14 天）</div>
-    <div class="col-chart">${cols}</div>
+    <div class="col-chart">${cols}</div>`}
   </div>`;
 }
 
