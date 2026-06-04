@@ -44,6 +44,8 @@ DEPLOY_CMD = os.getenv(
     "venv/bin/alembic upgrade head && systemctl restart project-manager && "
     "sleep 2 && systemctl is-active project-manager",
 )
+# 本地用來檢查/合併 alembic head 的執行檔（防呆用，避免多分支各產 migration 撞多重 head）
+ALEMBIC_BIN = os.getenv("BMO_ALEMBIC_BIN", os.path.join(WORKSPACE, "venv/bin/alembic"))
 
 HEADERS = {"X-Worker-Token": TOKEN} if TOKEN else {}
 
@@ -151,6 +153,29 @@ def run_job_on_branch(prompt: str, job_id: int, existing_branch: str | None):
     return (result or "") + info, None, branch, diff
 
 
+def ensure_single_alembic_head() -> str | None:
+    """部署防呆：若合併後出現多個 alembic head，自動 merge heads 並 commit。
+
+    多個 BMO 任務各開分支、各自產 migration 接在同一父 revision 上時會形成並行 head，
+    LXC 端 `alembic upgrade head` 會以 'Multiple head revisions are present' 失敗。
+    在 push 前就地收斂成單一 head，避免部署炸掉。回傳一句說明（有合併時）或 None。
+    """
+    alembic = ALEMBIC_BIN if os.path.exists(ALEMBIC_BIN) else "alembic"
+    p = subprocess.run([alembic, "heads"], cwd=WORKSPACE, capture_output=True, text=True)
+    if p.returncode != 0:
+        return None  # 查不動就放行，交給遠端部署照常處理／回報
+    heads = [ln for ln in p.stdout.splitlines() if "(head)" in ln]
+    if len(heads) <= 1:
+        return None
+    m = subprocess.run([alembic, "merge", "heads", "-m", "auto-merge bmo migration heads"],
+                       cwd=WORKSPACE, capture_output=True, text=True)
+    if m.returncode != 0:
+        raise RuntimeError(f"alembic merge heads 失敗：{(m.stderr or m.stdout).strip()[:200]}")
+    git("add", "alembic/versions")
+    git("commit", "-m", "chore(alembic): auto-merge migration heads (BMO deploy 防呆)")
+    return f"⚙️ 偵測到 {len(heads)} 個 alembic head，已自動 merge 為單一 head"
+
+
 def deploy_branch(branch: str):
     """把 branch 合併進 main、push，並 ssh 到 LXC 部署。回傳 (result, error, branch, None)。"""
     if not is_git_repo():
@@ -173,6 +198,11 @@ def deploy_branch(branch: str):
         except Exception:
             pass
         return None, f"合併失敗（可能有衝突，已 abort）：{e}", branch, None
+    # 防呆：合併後若出現多個 alembic head，就地自動 merge 成單一 head 再 push
+    try:
+        heads_note = ensure_single_alembic_head()
+    except Exception as e:
+        return None, f"alembic 多重 head 自動修復失敗：{e}", branch, None
     # push
     p = subprocess.run(["git", "-C", WORKSPACE, "push", "origin", BASE_BRANCH], capture_output=True, text=True)
     if p.returncode != 0:
@@ -190,7 +220,8 @@ def deploy_branch(branch: str):
         git("branch", "-d", branch)
     except Exception:
         pass
-    return f"🚀 已合併 `{branch}` 進 main 並部署上線\n{p.stdout.strip()[-200:]}", None, branch, None
+    head_line = f"\n{heads_note}" if heads_note else ""
+    return f"🚀 已合併 `{branch}` 進 main 並部署上線{head_line}\n{p.stdout.strip()[-200:]}", None, branch, None
 
 
 def process(job):
