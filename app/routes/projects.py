@@ -61,6 +61,12 @@ def _visible(query, caller: Caller):
         return query
     return query.filter(Project.owner_id == caller.owner_id)
 
+@router.get("/whoami")
+def whoami(caller: Caller = Depends(get_caller)):
+    """前端用：判斷目前使用者是否管理者，決定要不要顯示 BMO/Claude 等管理分頁。"""
+    return {"is_admin": caller.is_admin, "owner_id": caller.owner_id}
+
+
 # === Projects ===
 
 def _get_owned_project(project_id: int, caller: Caller, db: Session, include_deleted: bool = False):

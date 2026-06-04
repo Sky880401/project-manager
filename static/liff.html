@@ -214,8 +214,8 @@ body.guest .admin-only { display: none !important; }
     <div class="tab active" onclick="switchTab('dashboard')">儀表板</div>
     <div class="tab" onclick="switchTab('projects')">專案</div>
     <div class="tab" onclick="switchTab('tasks')">待辦</div>
-    <div class="tab" onclick="switchTab('bmo')">BMO</div>
-    <div class="tab" onclick="switchTab('claude')">Claude</div>
+    <div class="tab admin-only" onclick="switchTab('bmo')">BMO</div>
+    <div class="tab admin-only" onclick="switchTab('claude')">Claude</div>
   </div>
 </div>
 
@@ -370,6 +370,15 @@ async function init() {
   } catch(e) {
     console.log('LIFF init failed, running in browser mode');
   }
+  // 判斷是否管理者：非管理者(其他 LINE 好友)自動隱藏 BMO/Claude 等 admin-only 分頁，
+  // 避免一般使用者碰到會消耗 Sky 的 Claude 額度的功能。
+  try {
+    const me = await api('/api/projects/whoami');
+    if (me && me.is_admin === false) {
+      document.body.classList.add('guest');
+      if (currentTab === 'bmo' || currentTab === 'claude') switchTab('dashboard');
+    }
+  } catch(_) {}
   loadAll();
 }
 
