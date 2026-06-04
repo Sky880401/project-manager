@@ -10,7 +10,7 @@
   BMO_WORKER_TOKEN  與後端相同的 worker token
   BMO_WORKSPACE     Claude 執行的工作目錄（git repo），預設 ~/project-manager
   BMO_POLL_SECONDS  輪詢間隔秒數，預設 10
-  BMO_TIMEOUT       單一任務逾時秒數，預設 600
+  BMO_TIMEOUT       單一任務逾時秒數，預設 1200
   BMO_CLAUDE_BIN    claude 執行檔路徑，預設用 PATH 中的 claude
   BMO_CLAUDE_ARGS   附加在 claude 後的旗標（空白分隔）
 
@@ -32,7 +32,7 @@ WORKSPACE = os.path.expanduser(os.getenv("BMO_WORKSPACE", "~/project-manager"))
 # 這個 worker 負責的 workspace key（對應後端 BMO_WORKSPACES），只認領同 key 的 job
 WORKSPACE_KEY = os.getenv("BMO_WORKSPACE_KEY", "project-manager")
 POLL = int(os.getenv("BMO_POLL_SECONDS", "10"))
-TIMEOUT = int(os.getenv("BMO_TIMEOUT", "600"))
+TIMEOUT = int(os.getenv("BMO_TIMEOUT", "1200"))
 CLAUDE_BIN = os.getenv("BMO_CLAUDE_BIN", "claude")
 CLAUDE_ARGS = shlex.split(os.getenv("BMO_CLAUDE_ARGS", ""))
 # 部署參數（不同 workspace 各異）：合併/推送的分支、部署目標 ssh host、遠端部署指令
@@ -77,20 +77,22 @@ OUTPUT_GUIDE = (
 )
 
 
-def run_claude(prompt: str) -> tuple[str | None, str | None]:
+def run_claude(prompt: str) -> tuple[str | None, str | None, bool]:
+    """回傳 (result, error, timed_out)。timed_out=True 代表是逾時被砍，
+    但 claude 在逾時前可能已對檔案做出變更，呼叫端需檢查 git 狀態。"""
     Path(WORKSPACE).mkdir(parents=True, exist_ok=True)
     cmd = [CLAUDE_BIN, *CLAUDE_ARGS, "-p", prompt + OUTPUT_GUIDE]
     try:
         proc = subprocess.run(cmd, cwd=WORKSPACE, capture_output=True, text=True, timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
-        return None, f"逾時（>{TIMEOUT}s）"
+        return None, f"逾時（>{TIMEOUT}s）", True
     except FileNotFoundError:
-        return None, f"找不到 claude 執行檔：{CLAUDE_BIN}"
+        return None, f"找不到 claude 執行檔：{CLAUDE_BIN}", False
     out = (proc.stdout or "").strip()
     err = (proc.stderr or "").strip()
     if proc.returncode != 0:
-        return None, f"claude exit {proc.returncode}\n{err or out}"
-    return (out or "(無輸出)"), None
+        return None, f"claude exit {proc.returncode}\n{err or out}", False
+    return (out or "(無輸出)"), None, False
 
 
 def run_job_on_branch(prompt: str, job_id: int, existing_branch: str | None):
@@ -99,13 +101,13 @@ def run_job_on_branch(prompt: str, job_id: int, existing_branch: str | None):
     existing_branch 有值＝review 後續任務，沿用同分支；否則開新分支。
     """
     if not is_git_repo():
-        result, error = run_claude(prompt)
+        result, error, _ = run_claude(prompt)
         return result, error, None, None
 
     try:
         orig = git("rev-parse", "--abbrev-ref", "HEAD")
     except Exception as e:
-        result, error = run_claude(prompt)
+        result, error, _ = run_claude(prompt)
         return result, error, None, f"取得分支失敗：{e}"
 
     # 新任務開分支；後續任務沿用既有分支
@@ -124,18 +126,20 @@ def run_job_on_branch(prompt: str, job_id: int, existing_branch: str | None):
             return None, f"建立分支失敗：{e}", None, None
         base = orig
 
-    result, error = run_claude(prompt)
+    result, error, timed_out = run_claude(prompt)
 
     diff = None
     info = ""
+    committed = False
     try:
         changed = git("status", "--porcelain")
         if changed.strip():
             git("add", "-A")
             git("commit", "-m", f"BMO job #{job_id}", "-m", prompt[:200])
+            committed = True
         # 不論這輪有無新變更，回報分支相對主線的完整 diff
         diff = git("diff", f"{base}...{branch}")
-        if changed.strip():
+        if committed:
             stat = git("diff", "--stat", f"{base}...{branch}")
             info = f"\n\n🌿 變更已提交於分支 `{branch}`（已切回 {orig} 待 review）\n{stat}"
         else:
@@ -147,6 +151,12 @@ def run_job_on_branch(prompt: str, job_id: int, existing_branch: str | None):
         except Exception:
             pass
         info = f"\n\n⚠️ 分支處理出錯：{e}"
+
+    # 逾時但已有 commit：claude 雖被砍，變更已保住，視為完成（避免誤報為錯誤嚇人）
+    if error and timed_out and committed:
+        result = (f"⏱️ 已達逾時上限（{TIMEOUT}s）被中止，但 claude 在中止前已提交變更，"
+                  f"請 review 分支內容是否完整。" + info)
+        return result, None, branch, diff
 
     if error:
         return None, (error + info), branch, diff
