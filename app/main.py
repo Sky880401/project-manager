@@ -60,6 +60,10 @@ def dashboard():
 def liff():
     return FileResponse(os.path.join(STATIC_DIR, "liff.html"), headers=NO_CACHE)
 
+@app.get("/stock-workflow", include_in_schema=False)
+def stock_workflow():
+    return FileResponse(os.path.join(STATIC_DIR, "stock-workflow.html"), headers=NO_CACHE)
+
 
 def backup_database():
     """每小時自動備份 SQLite"""
