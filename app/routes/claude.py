@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import os
 
@@ -19,6 +19,7 @@ from app.schemas.claude_usage import (
     ClaudeStatusOut,
 )
 from app.services.claude_monitor import get_claude_status, resolve_rate_limit, resume_next_in_queue
+from app.routes.bmo import _is_admin_caller
 
 router = APIRouter(prefix="/claude", tags=["claude"])
 
@@ -88,7 +89,16 @@ def report_usage_limit(data: UsageLimitIn, db: Session = Depends(get_db)):
 
 
 @router.get("/code-usage")
-def get_code_usage(db: Session = Depends(get_db)):
+def get_code_usage(
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+    x_line_id_token: Optional[str] = Header(None),
+    x_line_user_id: Optional[str] = Header(None),
+    x_guest_preview: Optional[str] = Header(None),
+):
+    # Claude Code 訂閱用量屬管理者個人額度資料，一般使用者不得讀取（前端也隱藏 Claude 分頁）。
+    if not _is_admin_caller(authorization, x_line_id_token, x_line_user_id, x_guest_preview):
+        return {"available": False}
     report = db.query(CodeUsageReport).order_by(CodeUsageReport.reported_at.desc()).first()
     if not report:
         return {"available": False}
