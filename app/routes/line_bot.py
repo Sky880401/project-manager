@@ -101,6 +101,8 @@ def on_message(event):
             reply(event.reply_token, red_tasks_message(db))
         elif text in ["儀表板", "dashboard", "liff"]:
             reply(event.reply_token, dashboard_message())
+        elif text.startswith("額度 ") or text.startswith("回報額度 ") or text.lower().startswith("usage "):
+            reply(event.reply_token, report_usage_limit_text(db, text))
         elif text in ["用量", "usage", "code用量", "code", "額度"]:
             reply(event.reply_token, code_usage_text(db))
         elif text in ["費用", "api", "api用量"]:
@@ -203,6 +205,41 @@ def model_label(model_id):
     return model_id
 
 
+def report_usage_limit_text(db, text):
+    """回報 Claude Code /usage 的真實額度百分比。
+    格式：『額度 100 28』→ 5 小時 session 用量 100%、當周 28%。
+    只給一個數字時只更新 session。"""
+    from datetime import datetime, timezone
+    from app.models.claude_usage import CodeUsageReport
+    parts = text.split()
+    nums = []
+    for p in parts[1:]:
+        try:
+            nums.append(max(0, min(100, int(float(p.rstrip('%'))))))
+        except ValueError:
+            pass
+    if not nums:
+        return TextMessage(text=(
+            "請附上 /usage 的百分比\n"
+            "格式：額度 100 28\n"
+            "（第一個是 5 小時 session 用量 %，第二個是當周用量 %）"
+        ))
+    r = db.query(CodeUsageReport).order_by(CodeUsageReport.reported_at.desc()).first()
+    if not r:
+        r = CodeUsageReport()
+        db.add(r)
+    r.session_pct = nums[0]
+    if len(nums) >= 2:
+        r.weekly_pct = nums[1]
+    r.usage_reported_at = datetime.now(timezone.utc)
+    db.commit()
+    wk = f"、當周 {r.weekly_pct}%" if r.weekly_pct is not None else ""
+    return TextMessage(text=(
+        f"✅ 已更新真實額度\n5 小時 session {r.session_pct}%{wk}\n"
+        "儀表板現在會顯示這組數字（取代 token 估算值）"
+    ))
+
+
 def code_usage_text(db):
     from app.models.claude_usage import CodeUsageReport
     r = db.query(CodeUsageReport).order_by(CodeUsageReport.reported_at.desc()).first()
@@ -244,6 +281,7 @@ def help_text():
         "新增專案 名稱 — 建立新專案\n"
         "完成 任務名稱 — 標記任務完成\n"
         "用量 — 查看 Claude Code 模型與額度\n"
+        "額度 100 28 — 回報 /usage 真實百分比（session、當周）\n"
         "費用 — 查看 API 對話費用\n"
         "清除對話 — 清除 AI 對話記錄\n"
         "說明 — 顯示此說明\n\n"
