@@ -374,9 +374,19 @@ async function init() {
 }
 
 async function api(path, opts={}) {
+  // 帶上 LINE 身分，後端 get_caller 用來判斷專案擁有者（owner_id）；
+  // 桌機網頁版拿不到身分時後端視為管理者，行為與舊版一致。
+  const headers = {'Content-Type': 'application/json', ...(opts.headers || {})};
+  if (lineProfile && lineProfile.userId) headers['X-Line-User-Id'] = lineProfile.userId;
+  try {
+    if (typeof liff !== 'undefined' && liff.getIDToken && liff.getIDToken()) {
+      headers['X-Line-Id-Token'] = liff.getIDToken();
+    }
+  } catch(_) {}
+  if (isGuestPreview) headers['X-Guest-Preview'] = '1';
   const res = await fetch(API + path, {
-    headers: {'Content-Type': 'application/json'},
     ...opts,
+    headers,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   if (res.status === 204) return null;

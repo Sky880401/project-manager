@@ -35,6 +35,8 @@ class Project(Base):
     __tablename__ = "projects"
 
     id = Column(Integer, primary_key=True, index=True)
+    # 擁有者的 LINE userId；NULL = 舊資料（僅管理者可見）
+    owner_id = Column(String(64), nullable=True, index=True)
     name = Column(String(200), nullable=False)
     description = Column(Text)
     status = Column(Enum(ProjectStatus), default=ProjectStatus.active)
