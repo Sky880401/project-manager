@@ -111,12 +111,26 @@ def run_job_on_branch(prompt: str, job_id: int, existing_branch: str | None):
         return result, error, None, f"取得分支失敗：{e}"
 
     # 新任務開分支；後續任務沿用既有分支
+    resumed_note = ""
     if existing_branch:
         branch = existing_branch
         try:
             git("checkout", branch)
-        except Exception as e:
-            return None, f"切到既有分支 {branch} 失敗：{e}", branch, None
+        except Exception:
+            # 既有分支不在本機：可能只在遠端，先試 fetch 後再 checkout
+            try:
+                git("fetch", "origin", branch)
+                git("checkout", branch)
+            except Exception:
+                # 分支已被合併刪除（deploy 會把整鏈 archived+刪分支）。
+                # 舊變更早已併入主線，從目前主線開新分支接續即可。
+                branch = f"bmo/job-{job_id}-{int(time.time())}"
+                try:
+                    git("checkout", "-b", branch)
+                except Exception as e:
+                    return None, f"建立接續分支失敗：{e}", None, None
+                resumed_note = (f"\n\nℹ️ 原分支 `{existing_branch}` 已被合併刪除，"
+                                f"舊變更已在主線，改從 `{orig}` 開新分支 `{branch}` 接續。")
         base = orig  # diff 相對於主線
     else:
         branch = f"bmo/job-{job_id}-{int(time.time())}"
@@ -129,7 +143,7 @@ def run_job_on_branch(prompt: str, job_id: int, existing_branch: str | None):
     result, error, timed_out = run_claude(prompt)
 
     diff = None
-    info = ""
+    info = resumed_note
     committed = False
     try:
         changed = git("status", "--porcelain")
@@ -141,16 +155,16 @@ def run_job_on_branch(prompt: str, job_id: int, existing_branch: str | None):
         diff = git("diff", f"{base}...{branch}")
         if committed:
             stat = git("diff", "--stat", f"{base}...{branch}")
-            info = f"\n\n🌿 變更已提交於分支 `{branch}`（已切回 {orig} 待 review）\n{stat}"
+            info += f"\n\n🌿 變更已提交於分支 `{branch}`（已切回 {orig} 待 review）\n{stat}"
         else:
-            info = f"\n\n🌿 這一輪未產生新的檔案變更（分支 `{branch}` 維持原樣）"
+            info += f"\n\n🌿 這一輪未產生新的檔案變更（分支 `{branch}` 維持原樣）"
         git("checkout", orig)
     except Exception as e:
         try:
             git("checkout", orig)
         except Exception:
             pass
-        info = f"\n\n⚠️ 分支處理出錯：{e}"
+        info += f"\n\n⚠️ 分支處理出錯：{e}"
 
     # 逾時但已有 commit：claude 雖被砍，變更已保住，視為完成（避免誤報為錯誤嚇人）
     if error and timed_out and committed:
