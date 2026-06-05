@@ -63,6 +63,29 @@ def _verify_line_user(id_token: str | None) -> str | None:
         return None
 
 
+def _verify_line_access(access_token: str | None) -> str | None:
+    """用 LINE access token 取得真實 userId，失敗回 None。
+
+    access token 由 LIFF SDK 在背景自動續期，比短效的 id_token 耐放；
+    當 id_token 過期時改用它驗身分，避免使用者被迫重開 LIFF 或輸入通行碼。
+    """
+    if not access_token:
+        return None
+    try:
+        r = requests.get(
+            "https://api.line.me/v2/profile",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+        if r.status_code != 200:
+            logger.warning(f"LINE profile failed: {r.status_code} {r.text[:120]}")
+            return None
+        return r.json().get("userId")
+    except Exception as e:
+        logger.warning(f"LINE profile error: {e}")
+        return None
+
+
 def _now():
     return datetime.now(timezone.utc)
 
@@ -105,13 +128,15 @@ def _require_worker(token: Optional[str]):
         raise HTTPException(status_code=401, detail="invalid worker token")
 
 
-def _check_user(id_token: Optional[str], web_token: Optional[str] = None):
+def _check_user(id_token: Optional[str], web_token: Optional[str] = None,
+                access_token: Optional[str] = None):
     if not ALLOWED_USERS:
         return
     # 網頁版授權：帶對的 BMO_WEB_TOKEN 即視為本人（桌機瀏覽器拿不到 id_token 時用）
     if WEB_TOKEN and web_token and web_token == WEB_TOKEN:
         return
-    sub = _verify_line_user(id_token)
+    # 先用 id_token；過期/缺失時退而用 access token（LIFF 自動續期）查 profile
+    sub = _verify_line_user(id_token) or _verify_line_access(access_token)
     if sub not in ALLOWED_USERS:
         raise HTTPException(status_code=403, detail="只有授權的 LINE 帳號能派工給 BMO")
 
@@ -123,15 +148,18 @@ class JobCreate(BaseModel):
     workspace: Optional[str] = None
     id_token: Optional[str] = None
     web_token: Optional[str] = None
+    access_token: Optional[str] = None
 
 class JobComment(BaseModel):
     comment: str
     id_token: Optional[str] = None
     web_token: Optional[str] = None
+    access_token: Optional[str] = None
 
 class JobArchive(BaseModel):
     id_token: Optional[str] = None
     web_token: Optional[str] = None
+    access_token: Optional[str] = None
 
 class JobComplete(BaseModel):
     result: Optional[str] = None
@@ -142,6 +170,7 @@ class JobComplete(BaseModel):
 class JobDeploy(BaseModel):
     id_token: Optional[str] = None
     web_token: Optional[str] = None
+    access_token: Optional[str] = None
 
 class JobOut(BaseModel):
     id: int
@@ -261,7 +290,7 @@ def bmo_stats(
 def create_job(data: JobCreate, db: Session = Depends(get_db)):
     if not data.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt is empty")
-    _check_user(data.id_token, data.web_token)
+    _check_user(data.id_token, data.web_token, data.access_token)
     ws = data.workspace if data.workspace in WORKSPACES else DEFAULT_WORKSPACE
     job = BmoJob(prompt=data.prompt.strip(), task_id=data.task_id, status="queued", workspace=ws)
     db.add(job)
@@ -275,7 +304,7 @@ def comment_job(job_id: int, data: JobComment, db: Session = Depends(get_db)):
     """對某個已完成 job 的變更下 review comment，建立沿用同分支的後續 job。"""
     if not data.comment.strip():
         raise HTTPException(status_code=400, detail="comment is empty")
-    _check_user(data.id_token, data.web_token)
+    _check_user(data.id_token, data.web_token, data.access_token)
     parent = db.query(BmoJob).filter(BmoJob.id == job_id).first()
     if not parent:
         raise HTTPException(status_code=404, detail="job not found")
@@ -311,7 +340,7 @@ def comment_job(job_id: int, data: JobComment, db: Session = Depends(get_db)):
 @router.post("/jobs/{job_id}/deploy", response_model=JobOut, status_code=201)
 def deploy_job(job_id: int, data: JobDeploy, db: Session = Depends(get_db)):
     """一鍵合併+部署：建立一個 kind=deploy 的 job，worker 會把該分支合併進 main 並部署。"""
-    _check_user(data.id_token, data.web_token)
+    _check_user(data.id_token, data.web_token, data.access_token)
     src = db.query(BmoJob).filter(BmoJob.id == job_id).first()
     if not src:
         raise HTTPException(status_code=404, detail="job not found")
@@ -338,7 +367,7 @@ def list_jobs(limit: int = 20, include_archived: bool = False, db: Session = Dep
 def archive_job(job_id: int, data: JobArchive | None = None, db: Session = Depends(get_db)):
     """使用者標注完成：隱藏此 job，並把來源任務標記為 completed（從待辦移除）。"""
     if data is not None:
-        _check_user(data.id_token, data.web_token)
+        _check_user(data.id_token, data.web_token, data.access_token)
     job = db.query(BmoJob).filter(BmoJob.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="job not found")

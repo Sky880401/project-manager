@@ -1106,10 +1106,13 @@ async function archiveBmo(jobId) {
 // 取得授權資訊：LINE 內用 id_token；桌機網頁版拿不到 id_token 時，
 // 改用存在 localStorage 的網頁通行碼（BMO_WEB_TOKEN）。
 function authBody(extra) {
-  let id_token = null;
+  let id_token = null, access_token = null;
   try { id_token = liff.getIDToken(); } catch(_) {}
+  // access token 由 LIFF SDK 背景自動續期，比短效的 id_token 耐放；
+  // 一律帶上，後端在 id_token 過期時改用它驗身分（等於自動刷新，免重開/免輸碼）。
+  try { access_token = liff.getAccessToken(); } catch(_) {}
   const web_token = localStorage.getItem('bmo_web_token') || null;
-  return Object.assign({ id_token, web_token }, extra || {});
+  return Object.assign({ id_token, access_token, web_token }, extra || {});
 }
 // 在網頁版被擋（403）時，詢問一次通行碼存起來，下次就不用再問。
 function promptWebToken() {
