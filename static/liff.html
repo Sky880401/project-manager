@@ -386,6 +386,9 @@ async function api(path, opts={}) {
   // 帶上 LINE 身分，後端 get_caller 用來判斷專案擁有者（owner_id）；
   // 桌機網頁版拿不到身分時後端視為管理者，行為與舊版一致。
   const headers = {'Content-Type': 'application/json', ...(opts.headers || {})};
+  // 標記來源為 LIFF：後端據此判斷「拿不到身分的 LIFF 訪客」不可當管理者，
+  // 才不會在外部瀏覽器/未登入時看到管理者(owner_id=NULL)的專案。
+  headers['X-Client'] = 'liff';
   if (lineProfile && lineProfile.userId) headers['X-Line-User-Id'] = lineProfile.userId;
   try {
     if (typeof liff !== 'undefined' && liff.getIDToken && liff.getIDToken()) {
