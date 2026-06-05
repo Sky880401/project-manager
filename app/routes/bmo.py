@@ -294,6 +294,13 @@ def create_job(data: JobCreate, db: Session = Depends(get_db)):
     ws = data.workspace if data.workspace in WORKSPACES else DEFAULT_WORKSPACE
     job = BmoJob(prompt=data.prompt.strip(), task_id=data.task_id, status="queued", workspace=ws)
     db.add(job)
+    # 派工即把來源任務標記為進行中，使用者不必再手動切狀態
+    if data.task_id:
+        from app.models.project import Task, TaskStatus
+        task = db.query(Task).filter(Task.id == data.task_id,
+                                     Task.deleted_at.is_(None)).first()
+        if task and task.status == TaskStatus.todo:
+            task.status = TaskStatus.in_progress
     db.commit()
     db.refresh(job)
     return job
