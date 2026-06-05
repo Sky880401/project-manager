@@ -55,7 +55,11 @@ def get_caller(
     else:
         is_admin = owner_id in ADMIN_USERS
     if guest_preview:
+        # 預覽「其他使用者」的視角：不只降級為非管理者，也要拋棄管理者本人的
+        # owner_id，否則 _visible 仍會以管理者身分比對而顯示其自有專案，
+        # 造成「管理者新增的 project 在一般使用者上顯示」的錯覺。
         is_admin = False
+        owner_id = None
     return Caller(owner_id=owner_id, is_admin=is_admin)
 
 
