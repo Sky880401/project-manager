@@ -862,7 +862,7 @@ async function addTaskInline(projectId) {
   const title = document.getElementById('new-task-input').value.trim();
   if (!title) return;
   const description = document.getElementById('new-task-desc').value.trim();
-  await api(`/api/projects/${projectId}/tasks`, {method:'POST', body:{title, description: description || null}});
+  await api(`/api/projects/${projectId}/tasks`, {method:'POST', body:{title, description: description || null, priority:'high'}});
   toast('任務已新增');
   showProjectDetail(projectId, '');
   loadTasks();
@@ -876,7 +876,7 @@ async function addTaskAndDispatchBmo(projectId) {
   const description = document.getElementById('new-task-desc').value.trim();
   // 先建立任務（標記 auto_solve），取回 task_id
   const task = await api(`/api/projects/${projectId}/tasks`, {method:'POST', body:{
-    title, description: description || null, auto_solve: true
+    title, description: description || null, auto_solve: true, priority:'high'
   }});
   const prompt = description ? `${title}\n\n${description}` : title;
   const res = await fetch(API + '/api/bmo/jobs', {
