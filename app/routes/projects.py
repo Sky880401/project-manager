@@ -31,11 +31,15 @@ def get_caller(
     x_line_id_token: Optional[str] = Header(None),
     x_line_user_id: Optional[str] = Header(None),
     x_guest_preview: Optional[str] = Header(None),
+    x_client: Optional[str] = Header(None),
 ) -> Caller:
     """解析呼叫者身分。
     1. 若設定了 BMO_LINE_CHANNEL_ID，優先用 id_token 向 LINE 驗證取得真實 userId。
     2. 否則退而採用前端帶的 X-Line-User-Id（未驗證，僅供測試）。
-    3. 完全沒有身分（桌機 dashboard / 本機）視為管理者，可管理全部資料。
+    3. 完全沒有身分時：
+       - 來自 LIFF（X-Client=liff，例如在外部瀏覽器開 LIFF 或登入未完成）→ 視為訪客，
+         不得當管理者，避免看到管理者(owner_id=NULL)的專案。
+       - 其他（桌機 dashboard / 本機，無 X-Client）→ 維持舊行為視為管理者。
     X-Guest-Preview=1 時，即使是管理者也強制以一般使用者身分檢視（前端預覽用）。
     """
     token = x_line_id_token
@@ -44,8 +48,12 @@ def get_caller(
     owner_id = _verify_line_user(token) or x_line_user_id
 
     guest_preview = x_guest_preview == "1"
-    # 沒有任何 LINE 身分 → 桌機 dashboard / 本機，視為管理者
-    is_admin = (owner_id is None) or (owner_id in ADMIN_USERS)
+    from_liff = (x_client == "liff")
+    if owner_id is None:
+        # LIFF 來源但拿不到身分 → 訪客；唯有真正無前端身分(桌機/本機)才當管理者
+        is_admin = not from_liff
+    else:
+        is_admin = owner_id in ADMIN_USERS
     if guest_preview:
         is_admin = False
     return Caller(owner_id=owner_id, is_admin=is_admin)
@@ -59,6 +67,9 @@ def _visible(query, caller: Caller):
     """套用擁有者過濾：管理者看全部，一般使用者只看自己的。"""
     if caller.is_admin:
         return query
+    if caller.owner_id is None:
+        # 訪客（無法辨識身分）看不到任何專案，特別是管理者的 owner_id=NULL 舊資料
+        return query.filter(False)
     return query.filter(Project.owner_id == caller.owner_id)
 
 @router.get("/whoami")
