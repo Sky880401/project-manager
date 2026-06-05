@@ -264,6 +264,42 @@ const LIFF_ID = '2010243777-kq9FJSJT';
 let currentTab = 'dashboard';
 let lineProfile = null;
 let currentProjectName = '';
+let currentProject = null;
+
+// 把字串切成可比對的詞元：英數字單字 + 中文 2-gram
+function relevanceTokens(s) {
+  s = (s || '').toLowerCase();
+  const tokens = new Set();
+  (s.match(/[a-z0-9]+/g) || []).forEach(w => { if (w.length >= 2) tokens.add(w); });
+  const cjk = s.match(/[一-鿿]+/g) || [];
+  for (const seg of cjk) {
+    if (seg.length === 1) { tokens.add(seg); continue; }
+    for (let i = 0; i < seg.length - 1; i++) tokens.add(seg.slice(i, i + 2));
+  }
+  return tokens;
+}
+
+// 回傳 task 與專案的相關度（0~1）。比對對象：專案名稱、描述、既有任務標題
+function taskProjectRelevance(title, desc, project) {
+  if (!project) return 1;
+  const taskTokens = relevanceTokens(`${title} ${desc || ''}`);
+  if (!taskTokens.size) return 1;
+  let projText = `${project.name || ''} ${project.description || ''}`;
+  for (const t of (project.tasks || [])) projText += ` ${t.title || ''}`;
+  const projTokens = relevanceTokens(projText);
+  if (!projTokens.size) return 1;
+  let hit = 0;
+  for (const tk of taskTokens) if (projTokens.has(tk)) hit++;
+  return hit / taskTokens.size;
+}
+
+// 相關度過低時跳出二次確認，回傳 true 表示可繼續新增
+function confirmTaskRelevance(title, desc, project) {
+  const score = taskProjectRelevance(title, desc, project);
+  if (score >= 0.15) return true;
+  const pname = project && project.name ? project.name : '此專案';
+  return confirm(`⚠️ 這個任務看起來和專案「${pname}」關聯性偏低。\n\n任務：${title}\n\n是否確定要新增到這個專案？（可能選錯專案了）`);
+}
 // BMO 可派工的 workspace（從後端載入；先給合理預設避免面板空白）
 let BMO_WORKSPACES = [{key:'project-manager',label:'專案管理器'},{key:'stock_quant',label:'Stocker'}];
 async function loadWorkspaces() {
@@ -715,6 +751,7 @@ async function deleteProject(id, name) {
 async function showProjectDetail(id, name) {
   const p = await api(`/api/projects/${id}`);
   currentProjectName = p.name;
+  currentProject = p;
   const milestones = p.milestones || [];
   const tasks = p.tasks || [];
   showSheet(`
@@ -865,6 +902,7 @@ async function addTaskInline(projectId) {
   const title = document.getElementById('new-task-input').value.trim();
   if (!title) return;
   const description = document.getElementById('new-task-desc').value.trim();
+  if (!confirmTaskRelevance(title, description, currentProject)) return;
   await api(`/api/projects/${projectId}/tasks`, {method:'POST', body:{title, description: description || null, priority:'high'}});
   toast('任務已新增');
   showProjectDetail(projectId, '');
@@ -877,6 +915,7 @@ async function addTaskAndDispatchBmo(projectId) {
   const title = document.getElementById('new-task-input').value.trim();
   if (!title) return;
   const description = document.getElementById('new-task-desc').value.trim();
+  if (!confirmTaskRelevance(title, description, currentProject)) return;
   // 先建立任務（標記 auto_solve），取回 task_id
   const task = await api(`/api/projects/${projectId}/tasks`, {method:'POST', body:{
     title, description: description || null, auto_solve: true, priority:'high'
