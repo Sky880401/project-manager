@@ -640,6 +640,7 @@ async function loadProjects() {
       <div style="display:flex;gap:8px;margin-top:12px">
         <button class="project-card-btn" style="flex:1;margin-top:0" onclick="showProjectDetail(${p.id},'${esc(p.name)}')">查看詳情</button>
         <button class="icon-btn" onclick="showEditProject(${p.id})" title="編輯">✏️</button>
+        <button class="icon-btn" onclick="deleteProject(${p.id},'${esc(p.name)}')" title="刪除">🗑️</button>
       </div>
     </div>`;
   }).join('');
