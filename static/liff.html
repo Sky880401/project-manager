@@ -196,6 +196,8 @@ body.no-select, body.no-select * { -webkit-user-select: none !important; user-se
 .empty .icon { font-size: 40px; margin-bottom: 12px; }
 /* 一般使用者預覽模式：隱藏所有管理者專屬功能 */
 body.guest .admin-only { display: none !important; }
+/* 真實一般使用者（非管理者本人）不該看到「預覽」切換鈕，那是管理者測試用 */
+body.real-guest #guest-toggle { display: none !important; }
 #guest-banner { position: fixed; bottom: 0; left: 0; right: 0; background: #5b4ee5; color: #fff;
   text-align: center; font-size: 12px; line-height: 1.4; padding: 8px 12px; z-index: 1000; }
 </style>
@@ -375,7 +377,7 @@ async function init() {
   try {
     const me = await api('/api/projects/whoami');
     if (me && me.is_admin === false) {
-      document.body.classList.add('guest');
+      document.body.classList.add('guest', 'real-guest');
       if (currentTab === 'bmo' || currentTab === 'claude') switchTab('dashboard');
     }
   } catch(_) {}
