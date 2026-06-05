@@ -365,5 +365,3 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         log("worker 結束")
         sys.exit(0)
-
-# [verify] worker auto-reload 端到端測試標記（無功能影響）
