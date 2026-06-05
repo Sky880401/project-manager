@@ -133,12 +133,25 @@ def run_job_on_branch(prompt: str, job_id: int, existing_branch: str | None):
                                 f"舊變更已在主線，改從 `{orig}` 開新分支 `{branch}` 接續。")
         base = orig  # diff 相對於主線
     else:
+        # 新任務一律從「最新的主線」開分支，避免接到別的 task 還沒合併的 review 分支上，
+        # 縮短並行時間、減少日後合併衝突（對應同時作業疑慮的建議做法）。
+        start_point = BASE_BRANCH
+        try:
+            git("fetch", "origin", BASE_BRANCH)
+            start_point = f"origin/{BASE_BRANCH}"
+        except Exception:
+            # 抓不到遠端（離線等）就退回本機主線；本機主線抓不到再退回目前分支
+            try:
+                git("rev-parse", "--verify", BASE_BRANCH)
+                start_point = BASE_BRANCH
+            except Exception:
+                start_point = orig
         branch = f"bmo/job-{job_id}-{int(time.time())}"
         try:
-            git("checkout", "-b", branch)
+            git("checkout", "-b", branch, start_point)
         except Exception as e:
             return None, f"建立分支失敗：{e}", None, None
-        base = orig
+        base = start_point  # diff 相對於開分支的最新主線
 
     result, error, timed_out = run_claude(prompt)
 
