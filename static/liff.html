@@ -714,6 +714,11 @@ async function showProjectDetail(id, name) {
   showSheet(`
     <div class="sheet-handle"></div>
     <div class="sheet-title">📁 ${esc(p.name)}</div>
+    <div style="margin-bottom:16px">
+      <input id="new-task-input" placeholder="新增任務…" style="width:100%;padding:12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;margin-bottom:8px">
+      <textarea id="new-task-desc" placeholder="描述（選填，可寫詳細需求供 BMO 讀取）" rows="2" style="width:100%;padding:12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;margin-bottom:8px;resize:vertical;font-family:inherit"></textarea>
+      <button class="sheet-btn" onclick="addTaskInline(${id})">新增任務</button>
+    </div>
     ${milestones.map(m => {
       const mTasks = sortTasks(tasks.filter(t => t.milestone_id === m.id));
       const done = mTasks.filter(t => t.status==='completed').length;
@@ -728,11 +733,6 @@ async function showProjectDetail(id, name) {
       const title = milestones.length ? '未分類任務' : '任務';
       return `<div class="section-title">${title}</div>${uncat.map(t => taskHTML(t, id)).join('')}`;
     })()}
-    <div style="margin-top:16px">
-      <input id="new-task-input" placeholder="新增任務…" style="width:100%;padding:12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;margin-bottom:8px">
-      <textarea id="new-task-desc" placeholder="描述（選填，可寫詳細需求供 BMO 讀取）" rows="2" style="width:100%;padding:12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;margin-bottom:8px;resize:vertical;font-family:inherit"></textarea>
-      <button class="sheet-btn" onclick="addTaskInline(${id})">新增任務</button>
-    </div>
   `);
 }
 
