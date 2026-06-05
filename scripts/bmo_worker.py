@@ -46,8 +46,34 @@ DEPLOY_CMD = os.getenv(
 )
 # 本地用來檢查/合併 alembic head 的執行檔（防呆用，避免多分支各產 migration 撞多重 head）
 ALEMBIC_BIN = os.getenv("BMO_ALEMBIC_BIN", os.path.join(WORKSPACE, "venv/bin/alembic"))
+# 部署若動到 worker 自身的 code/plist，需重載 launchd 才會生效（KeepAlive 不會因改碼重載）。
+# 路徑檔名片段命中就視為「worker 改動」；逗號分隔。
+WORKER_RELOAD_PATHS = [s for s in os.getenv(
+    "BMO_WORKER_RELOAD_PATHS", "scripts/bmo_worker.py").split(",") if s.strip()]
+# 要重載的 launchd plist（兩個 worker 共用同一份 code，預設都重載）；逗號分隔，~ 會展開。
+WORKER_PLISTS = [os.path.expanduser(s.strip()) for s in os.getenv(
+    "BMO_WORKER_PLISTS",
+    "~/Library/LaunchAgents/com.bmo.worker.plist,"
+    "~/Library/LaunchAgents/com.bmo.worker2.plist").split(",") if s.strip()]
 
 HEADERS = {"X-Worker-Token": TOKEN} if TOKEN else {}
+
+
+def schedule_worker_reload():
+    """部署動到 worker code 時呼叫：開一個脫離本進程的子程序，延遲數秒後重載兩個
+    launchd worker。延遲是為了讓本次 deploy job 先把 complete 回報出去，重載會把
+    目前這個 worker 進程一起換掉，新進程啟動那輪就吃到新 code。"""
+    cmds = "; ".join(f'launchctl unload "{p}" 2>/dev/null; launchctl load "{p}"'
+                     for p in WORKER_PLISTS)
+    script = f"sleep 8; {cmds}"
+    try:
+        subprocess.Popen(["bash", "-c", script], start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        log(f"🔁 偵測到 worker 改動，已排程 {len(WORKER_PLISTS)} 個 worker 於回報後重載")
+        return True
+    except Exception as e:
+        log(f"排程 worker 重載失敗：{e}")
+        return False
 
 
 def log(*a):
@@ -241,6 +267,13 @@ def deploy_branch(branch: str):
         except Exception:
             pass
         return None, f"合併失敗（可能有衝突，已 abort）：{e}", branch, None
+    # 合併後立即看這次併入了哪些檔案（HEAD 是 merge commit，相對第一父= main 舊 tip）
+    worker_changed = False
+    try:
+        changed = git("diff", "--name-only", "HEAD^1", "HEAD").splitlines()
+        worker_changed = any(any(key in f for key in WORKER_RELOAD_PATHS) for f in changed)
+    except Exception:
+        pass
     # 防呆：合併後若出現多個 alembic head，就地自動 merge 成單一 head 再 push
     try:
         heads_note = ensure_single_alembic_head()
@@ -263,8 +296,13 @@ def deploy_branch(branch: str):
         git("branch", "-d", branch)
     except Exception:
         pass
+    # 若這次部署動到 worker 自身 code/plist，排程重載（在 complete 回報後才真正重載）
+    reload_note = ""
+    if worker_changed and schedule_worker_reload():
+        reload_note = "\n🔁 已自動重載 BMO worker（新 code 數秒後生效）"
     head_line = f"\n{heads_note}" if heads_note else ""
-    return f"🚀 已合併 `{branch}` 進 main 並部署上線{head_line}\n{p.stdout.strip()[-200:]}", None, branch, None
+    return (f"🚀 已合併 `{branch}` 進 main 並部署上線{head_line}{reload_note}\n"
+            f"{p.stdout.strip()[-200:]}", None, branch, None)
 
 
 def auto_dispatch():
