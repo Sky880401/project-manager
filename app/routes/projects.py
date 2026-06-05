@@ -155,10 +155,17 @@ def update_project(project_id: int, data: ProjectUpdate, db: Session = Depends(g
 
 @router.delete("/{project_id}", status_code=204)
 def delete_project(project_id: int, db: Session = Depends(get_db), caller: Caller = Depends(get_caller)):
-    """軟刪除：設定 deleted_at，資料保留可還原"""
-    project = _get_owned_project(project_id, caller, db)
+    """軟刪除：設定 deleted_at，資料保留可還原。
+    擁有權檢查：管理者可刪全部；一般使用者只能刪 owner_id == 自己的專案，
+    否則回 403（而非 404，明確告知無權限刪除他人專案）。"""
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.deleted_at.is_(None),
+    ).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    if not caller.is_admin and (caller.owner_id is None or project.owner_id != caller.owner_id):
+        raise HTTPException(status_code=403, detail="無權限刪除他人的專案")
     project.deleted_at = _now()
     db.commit()
 
