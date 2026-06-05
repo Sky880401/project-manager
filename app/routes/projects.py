@@ -55,11 +55,14 @@ def get_caller(
     else:
         is_admin = owner_id in ADMIN_USERS
     if guest_preview:
-        # 預覽「其他使用者」的視角：不只降級為非管理者，也要拋棄管理者本人的
-        # owner_id，否則 _visible 仍會以管理者身分比對而顯示其自有專案，
-        # 造成「管理者新增的 project 在一般使用者上顯示」的錯覺。
+        # 預覽「其他使用者」的視角：降級為非管理者，並用一個獨立的合成 owner_id，
+        # 而非直接拋棄成 None。若設成 None，_visible 會把它當「無身分訪客」而看不到
+        # 任何專案；此時新增的 project 也會存成 owner_id=NULL，預覽模式自己看不到，
+        # 切回管理者(看得到 NULL 舊資料)才出現，造成「新增後不顯示」的 bug。
+        # 改用合成 id 後：預覽模式自成一個獨立帳號，新增的專案立即可見，
+        # 也不會混到管理者本人(owner_id=NULL)的資料。
         is_admin = False
-        owner_id = None
+        owner_id = "guest-preview:" + (owner_id or "anon")
     return Caller(owner_id=owner_id, is_admin=is_admin)
 
 
