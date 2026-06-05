@@ -1029,6 +1029,12 @@ async function loadBmo() {
     return;
   }
   const badge = {queued:'⏳ 排隊中',running:'⚙️ 執行中',done:'✅ 完成',error:'⚠️ 失敗'};
+  // 同一系列（延續任務）共用一個編號：原始 #66、後續 #66-1、#66-2…
+  const byId = {}; jobs.forEach(j => byId[j.id] = j);
+  function rootId(j){ let cur = j; const seen = new Set(); while (cur.parent_id && byId[cur.parent_id] && !seen.has(cur.id)){ seen.add(cur.id); cur = byId[cur.parent_id]; } return cur.id; }
+  const chains = {}; jobs.forEach(j => { const r = rootId(j); (chains[r] = chains[r] || []).push(j); });
+  const labelOf = {};
+  Object.entries(chains).forEach(([r, arr]) => { arr.sort((a,b) => a.id - b.id).forEach((j, idx) => { labelOf[j.id] = idx === 0 ? `#${r}` : `#${r}-${idx}`; }); });
   el.innerHTML = jobs.slice(0,20).map(j => {
     // 標題：延續任務的 prompt 是自動包裝文，抓出使用者真正的 comment 來顯示
     let titleText = (j.prompt||'').split('\n')[0];
@@ -1053,7 +1059,7 @@ async function loadBmo() {
     ` : '';
     return `
       <div class="queue-card">
-        <div class="queue-desc">#${j.id} ${esc(titleText)}${j.parent_id?` <span style="color:var(--muted);font-weight:400">(延續 #${j.parent_id})</span>`:''}</div>
+        <div class="queue-desc">${labelOf[j.id]||('#'+j.id)} ${esc(titleText)}${j.parent_id&&labelOf[j.parent_id]?` <span style="color:var(--muted);font-weight:400">(延續 ${labelOf[j.parent_id]})</span>`:''}</div>
         <div class="queue-ckpt">${badge[j.status]||j.status}${j.workspace&&j.workspace!=='project-manager'?` · 📦 ${esc((BMO_WORKSPACES.find(w=>w.key===j.workspace)||{}).label||j.workspace)}`:''}${j.branch?` · 🌿 ${esc(j.branch)}`:''}</div>
         ${feedback}
         ${commentBox}
