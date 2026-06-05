@@ -1093,7 +1093,6 @@ async function loadBmo() {
         <summary style="font-size:12px;color:var(--blue);cursor:pointer;font-weight:600">查看 BMO 反饋</summary>
         ${cur.result ? `<div class="task-desc" style="max-height:160px;overflow:auto;margin-top:8px;white-space:pre-wrap">${esc(plainify(cur.result))}</div>` : ''}
         ${cur.status==='error' && cur.error ? `<div class="task-desc" style="color:var(--red);margin-top:8px">${esc(cur.error)}</div>` : ''}
-        ${cur.diff ? `<pre style="background:#0d1117;color:#c9d1d9;font-size:11px;padding:10px;border-radius:8px;overflow:auto;max-height:240px;margin-top:8px;white-space:pre">${esc(cur.diff)}</pre>` : ''}
       </details>` : '';
     // comment 框：最新一步完成就給框，即使沒 diff（純問答/分析）也能回 comment 讓 BMO 同分支繼續
     const commentBox = (cur.status==='done' && cur.kind!=='deploy') ? `
