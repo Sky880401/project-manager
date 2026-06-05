@@ -267,6 +267,25 @@ def deploy_branch(branch: str):
     return f"🚀 已合併 `{branch}` 進 main 並部署上線{head_line}\n{p.stdout.strip()[-200:]}", None, branch, None
 
 
+def auto_dispatch():
+    """請後端把標注 auto_solve 的待辦任務自動轉成 queued job（本 worker 的 workspace）。
+
+    後端 /auto-dispatch 會挑 status=todo 且 auto_solve=True、且沒有未封存 job 的任務，
+    建立 job 並把任務標為 in_progress，避免重複派工。沒有符合的任務時回傳空陣列。
+    """
+    try:
+        r = requests.post(f"{API_BASE}/api/bmo/auto-dispatch",
+                          params={"workspace": WORKSPACE_KEY}, headers=HEADERS, timeout=15)
+        if r.status_code == 200:
+            n = len(r.json())
+            if n:
+                log(f"🤖 auto-solve：自動派工 {n} 個任務")
+        else:
+            log(f"auto-dispatch 失敗：{r.status_code} {r.text[:120]}")
+    except Exception as e:
+        log(f"auto-dispatch 例外：{e}")
+
+
 def process(job):
     jid = job["id"]
     r = requests.post(f"{API_BASE}/api/bmo/jobs/{jid}/claim", headers=HEADERS, timeout=15)
@@ -289,6 +308,7 @@ def main():
     log(f"BMO worker 啟動：API={API_BASE} workspace={WORKSPACE} poll={POLL}s")
     while True:
         try:
+            auto_dispatch()
             r = requests.get(f"{API_BASE}/api/bmo/jobs/queued",
                              params={"workspace": WORKSPACE_KEY}, headers=HEADERS, timeout=15)
             if r.status_code == 200:
