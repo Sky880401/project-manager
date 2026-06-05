@@ -343,6 +343,10 @@ def archive_job(job_id: int, data: JobArchive | None = None, db: Session = Depen
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
     job.archived = True
+    # 整條鏈一次收掉：同一分支（task→comment→deploy 共用同分支）的 job 全封存，
+    # 避免前端「一個框」收尾後，鏈中其他未封存 job 又把這條鏈撐回畫面。
+    if job.branch:
+        db.query(BmoJob).filter(BmoJob.branch == job.branch).update({"archived": True})
     # 連帶把來源任務標記完成，讓它從待辦消失
     if job.task_id:
         from app.models.project import Task, TaskStatus

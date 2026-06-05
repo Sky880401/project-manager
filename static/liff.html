@@ -1029,42 +1029,45 @@ async function loadBmo() {
     return;
   }
   const badge = {queued:'⏳ 排隊中',running:'⚙️ 執行中',done:'✅ 完成',error:'⚠️ 失敗'};
-  // 同一系列（延續任務）共用一個編號：原始 #66、後續 #66-1、#66-2…
+  // 一個 task = 一個框：同一系列（task→comment→deploy）的所有 job 收進一張卡片，
+  // 共用原始編號 #66。不管在等 commit 還是等上線，都只看這一個框。
   const byId = {}; jobs.forEach(j => byId[j.id] = j);
   function rootId(j){ let cur = j; const seen = new Set(); while (cur.parent_id && byId[cur.parent_id] && !seen.has(cur.id)){ seen.add(cur.id); cur = byId[cur.parent_id]; } return cur.id; }
   const chains = {}; jobs.forEach(j => { const r = rootId(j); (chains[r] = chains[r] || []).push(j); });
-  const labelOf = {};
-  Object.entries(chains).forEach(([r, arr]) => { arr.sort((a,b) => a.id - b.id).forEach((j, idx) => { labelOf[j.id] = idx === 0 ? `#${r}` : `#${r}-${idx}`; }); });
-  el.innerHTML = jobs.slice(0,20).map(j => {
-    // 標題：延續任務的 prompt 是自動包裝文，抓出使用者真正的 comment 來顯示
-    let titleText = (j.prompt||'').split('\n')[0];
-    const m = (j.prompt||'').match(/review comment：\s*\n?([^\n]+)/);
-    if (m) titleText = '💬 ' + m[1].trim();
-    const hasFeedback = (j.status==='done' && (j.result || j.diff)) || (j.status==='error' && j.error);
+  // 每條鏈一張卡片，依最新 job id 由新到舊排序
+  const cards = Object.entries(chains).map(([r, arr]) => {
+    arr.sort((a,b) => a.id - b.id);
+    const root = arr[0];                 // 原始任務（標題來源）
+    const cur = arr[arr.length - 1];     // 最新一步（狀態/反饋/動作來源）
+    return {r: Number(r), root, cur, arr};
+  }).sort((a,b) => b.cur.id - a.cur.id);
+  el.innerHTML = cards.slice(0,20).map(({r, root, cur}) => {
+    // 標題用原始任務的第一行（延續任務的 prompt 是自動包裝文，不拿來當標題）
+    const titleText = (root.prompt||'').split('\n')[0];
+    const hasFeedback = (cur.status==='done' && (cur.result || cur.diff)) || (cur.status==='error' && cur.error);
     // 反饋內容預設收起，點 summary 才展開
     const feedback = hasFeedback ? `
       <details style="margin-top:8px">
         <summary style="font-size:12px;color:var(--blue);cursor:pointer;font-weight:600">查看 BMO 反饋</summary>
-        ${j.result ? `<div class="task-desc" style="max-height:160px;overflow:auto;margin-top:8px;white-space:pre-wrap">${esc(plainify(j.result))}</div>` : ''}
-        ${j.status==='error' && j.error ? `<div class="task-desc" style="color:var(--red);margin-top:8px">${esc(j.error)}</div>` : ''}
-        ${j.diff ? `<pre style="background:#0d1117;color:#c9d1d9;font-size:11px;padding:10px;border-radius:8px;overflow:auto;max-height:240px;margin-top:8px;white-space:pre">${esc(j.diff)}</pre>` : ''}
+        ${cur.result ? `<div class="task-desc" style="max-height:160px;overflow:auto;margin-top:8px;white-space:pre-wrap">${esc(plainify(cur.result))}</div>` : ''}
+        ${cur.status==='error' && cur.error ? `<div class="task-desc" style="color:var(--red);margin-top:8px">${esc(cur.error)}</div>` : ''}
+        ${cur.diff ? `<pre style="background:#0d1117;color:#c9d1d9;font-size:11px;padding:10px;border-radius:8px;overflow:auto;max-height:240px;margin-top:8px;white-space:pre">${esc(cur.diff)}</pre>` : ''}
       </details>` : '';
-    // comment 框維持常駐顯示（不收進 details）；只要任務完成就給框，
-    // 即使這輪沒 diff（純問答/分析）也能回 comment 讓 BMO 同分支繼續
-    const commentBox = (j.status==='done' && j.kind!=='deploy') ? `
+    // comment 框：最新一步完成就給框，即使沒 diff（純問答/分析）也能回 comment 讓 BMO 同分支繼續
+    const commentBox = (cur.status==='done' && cur.kind!=='deploy') ? `
       <div class="admin-only">
-      <textarea id="cmt-${j.id}" placeholder="對這次變更下 comment，回傳給 BMO 判斷下一步…" rows="2" style="width:100%;margin-top:8px;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;resize:vertical;font-family:inherit"></textarea>
-      <button class="queue-btn resume" style="margin-top:6px;width:100%" onclick="commentBmo(${j.id})">💬 回傳 comment 給 BMO</button>
+      <textarea id="cmt-${cur.id}" placeholder="對這次變更下 comment，回傳給 BMO 判斷下一步…" rows="2" style="width:100%;margin-top:8px;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;resize:vertical;font-family:inherit"></textarea>
+      <button class="queue-btn resume" style="margin-top:6px;width:100%" onclick="commentBmo(${cur.id})">💬 回傳 comment 給 BMO</button>
       </div>
     ` : '';
     return `
       <div class="queue-card">
-        <div class="queue-desc">${labelOf[j.id]||('#'+j.id)} ${esc(titleText)}${j.parent_id&&labelOf[j.parent_id]?` <span style="color:var(--muted);font-weight:400">(延續 ${labelOf[j.parent_id]})</span>`:''}</div>
-        <div class="queue-ckpt">${badge[j.status]||j.status}${j.workspace&&j.workspace!=='project-manager'?` · 📦 ${esc((BMO_WORKSPACES.find(w=>w.key===j.workspace)||{}).label||j.workspace)}`:''}${j.branch?` · 🌿 ${esc(j.branch)}`:''}</div>
+        <div class="queue-desc">#${r} ${esc(titleText)}</div>
+        <div class="queue-ckpt">${badge[cur.status]||cur.status}${cur.kind==='deploy'?' · 🚀 部署中':''}${cur.workspace&&cur.workspace!=='project-manager'?` · 📦 ${esc((BMO_WORKSPACES.find(w=>w.key===cur.workspace)||{}).label||cur.workspace)}`:''}${cur.branch?` · 🌿 ${esc(cur.branch)}`:''}</div>
         ${feedback}
         ${commentBox}
-        ${j.status==='done' && j.branch && j.kind!=='deploy' && j.diff ? `<button class="queue-btn resume admin-only" style="margin-top:8px;width:100%;background:#5b4ee5" onclick="deployBmo(${j.id})">🚀 合併並上線</button>` : ''}
-        <button class="queue-btn cancel admin-only" style="margin-top:8px;width:100%" onclick="archiveBmo(${j.id})">✅ 標注完成並隱藏</button>
+        ${cur.status==='done' && cur.branch && cur.kind!=='deploy' && cur.diff ? `<button class="queue-btn resume admin-only" style="margin-top:8px;width:100%;background:#5b4ee5" onclick="deployBmo(${cur.id})">🚀 合併並上線</button>` : ''}
+        <button class="queue-btn cancel admin-only" style="margin-top:8px;width:100%" onclick="archiveBmo(${cur.id})">✅ 標注完成並隱藏</button>
       </div>`;
   }).join('') + `<button onclick="loadBmo()" style="width:100%;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;font-size:13px;cursor:pointer;margin-top:8px">重新整理</button>`;
 }
