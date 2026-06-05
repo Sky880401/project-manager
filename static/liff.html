@@ -718,6 +718,7 @@ async function showProjectDetail(id, name) {
       <input id="new-task-input" placeholder="新增任務…" style="width:100%;padding:12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;margin-bottom:8px">
       <textarea id="new-task-desc" placeholder="描述（選填，可寫詳細需求供 BMO 讀取）" rows="2" style="width:100%;padding:12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;margin-bottom:8px;resize:vertical;font-family:inherit"></textarea>
       <button class="sheet-btn" onclick="addTaskInline(${id})">新增任務</button>
+      <button class="sheet-btn admin-only" style="background:#5b4ee5;margin-top:8px" onclick="addTaskAndDispatchBmo(${id})">🤖 新增並交給 BMO 自動解題</button>
     </div>
     ${milestones.map(m => {
       const mTasks = sortTasks(tasks.filter(t => t.milestone_id === m.id));
@@ -863,6 +864,32 @@ async function addTaskInline(projectId) {
   showProjectDetail(projectId, '');
   loadTasks();
   loadDashboard();
+}
+
+async function addTaskAndDispatchBmo(projectId) {
+  if (isGuestPreview) { toast('預覽模式：一般使用者無法派工'); return; }
+  const title = document.getElementById('new-task-input').value.trim();
+  if (!title) return;
+  const description = document.getElementById('new-task-desc').value.trim();
+  // 先建立任務（標記 auto_solve），取回 task_id
+  const task = await api(`/api/projects/${projectId}/tasks`, {method:'POST', body:{
+    title, description: description || null, auto_solve: true
+  }});
+  const prompt = description ? `${title}\n\n${description}` : title;
+  const res = await fetch(API + '/api/bmo/jobs', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(authBody({prompt, task_id: task && task.id})),
+  });
+  if (res.status === 403) {
+    if (promptWebToken()) return addTaskAndDispatchBmo(projectId);
+    toast('未授權：只有你本人能派工'); return;
+  }
+  if (!res.ok) { toast('已新增任務，但派工失敗'); loadTasks(); return; }
+  closeSheetForce();
+  toast('已新增並派給 BMO 自動解題 🤖');
+  loadTasks();
+  loadDashboard();
+  switchTab('bmo');
 }
 
 // === Tasks ===
