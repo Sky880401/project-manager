@@ -98,3 +98,21 @@ class BmoJob(Base):
     finished_at = Column(DateTime(timezone=True))
     notified = Column(Boolean, default=False)
     archived = Column(Boolean, default=False)        # 使用者標注完成後隱藏
+    source = Column(Text, nullable=True)             # 派工來源；"hermes"=Hermes agent，NULL/其他=人類
+
+
+class BmoJobSuggestion(Base):
+    """Hermes agent 對某個 job 提交的「待採用建議」。
+
+    Hermes 不能直接 comment（會觸發 worker 改碼），只能 suggest；
+    真人在 LIFF review 後 adopt（轉成 comment 派工）或 reject。
+    """
+    __tablename__ = "bmo_job_suggestions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, nullable=False, index=True)   # FK -> bmo_jobs.id
+    suggestion = Column(Text, nullable=False)              # 建議內容
+    rationale = Column(Text, nullable=True)                # 理由（選填）
+    status = Column(String(20), nullable=False, default="pending")  # pending/adopted/rejected
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)     # adopt/reject 時間
