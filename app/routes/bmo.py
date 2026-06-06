@@ -12,17 +12,20 @@ Review 迴圈：
 worker 專用端點（queued/claim/complete）需帶 X-Worker-Token，
 值為環境變數 BMO_WORKER_TOKEN；未設定時不啟用驗證（僅供本機測試）。
 """
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timezone
 import os
+import json
+import hmac
+import hashlib
 import logging
 import requests
 
 from pydantic import BaseModel
 from app.database import get_db
-from app.models.claude_usage import BmoJob
+from app.models.claude_usage import BmoJob, BmoJobSuggestion
 from app.services.line_push import push_to_all
 
 router = APIRouter(prefix="/bmo", tags=["bmo"])
@@ -42,6 +45,13 @@ LINE_CHANNEL_ID = os.getenv("BMO_LINE_CHANNEL_ID", "")
 # 網頁版（桌機瀏覽器）後門：LIFF 在外部瀏覽器常拿不到 id_token，
 # 改用此密碼讓本人在網頁上也能 comment/派工。留空＝不啟用網頁授權。
 WEB_TOKEN = os.getenv("BMO_WEB_TOKEN", "")
+# Hermes agent 整合（在 LXC #200 上呼叫）：
+# - BMO_HERMES_TOKEN：帶 X-Hermes-Token 即通過驗證，auth_scope 標 "hermes"（受限）
+# - HERMES_CALLBACK_URL：Hermes job 完成後 BMO 主動 POST 結果到這個 URL
+# - BMO_CALLBACK_SECRET：callback 的 HMAC-SHA256 簽章金鑰（獨立於 HERMES_TOKEN）
+HERMES_TOKEN = os.getenv("BMO_HERMES_TOKEN", "")
+HERMES_CALLBACK_URL = os.getenv("HERMES_CALLBACK_URL", "")
+CALLBACK_SECRET = os.getenv("BMO_CALLBACK_SECRET", "")
 
 
 def _verify_line_user(id_token: str | None) -> str | None:
@@ -128,17 +138,75 @@ def _require_worker(token: Optional[str]):
         raise HTTPException(status_code=401, detail="invalid worker token")
 
 
+def _set_scope(request: Optional[Request], scope: str):
+    """記錄這次請求的授權範圍到 request.state.auth_scope。
+    scope: "human"（LINE 本人 / 網頁通行碼）/ "hermes"（Hermes agent token）。"""
+    if request is not None:
+        request.state.auth_scope = scope
+
+
 def _check_user(id_token: Optional[str], web_token: Optional[str] = None,
-                access_token: Optional[str] = None):
+                access_token: Optional[str] = None, hermes_token: Optional[str] = None,
+                request: Optional[Request] = None):
+    # Hermes agent 授權：帶對的 BMO_HERMES_TOKEN → 通過但標記受限 scope。
+    # 放最前面，確保即使 ALLOWED_USERS 為空（測試模式）也不會被誤判為 human。
+    if HERMES_TOKEN and hermes_token and hermes_token == HERMES_TOKEN:
+        _set_scope(request, "hermes")
+        return
     if not ALLOWED_USERS:
+        _set_scope(request, "human")
         return
     # 網頁版授權：帶對的 BMO_WEB_TOKEN 即視為本人（桌機瀏覽器拿不到 id_token 時用）
     if WEB_TOKEN and web_token and web_token == WEB_TOKEN:
+        _set_scope(request, "human")
         return
     # 先用 id_token；過期/缺失時退而用 access token（LIFF 自動續期）查 profile
     sub = _verify_line_user(id_token) or _verify_line_access(access_token)
     if sub not in ALLOWED_USERS:
         raise HTTPException(status_code=403, detail="只有授權的 LINE 帳號能派工給 BMO")
+    _set_scope(request, "human")
+
+
+def _scope(request: Request) -> Optional[str]:
+    return getattr(request.state, "auth_scope", None)
+
+
+def _require_human(request: Request):
+    """端點要求真人授權（deploy / comment / suggestion review）。"""
+    if _scope(request) != "human":
+        raise HTTPException(status_code=403, detail="deploy requires human authentication")
+
+
+def _send_hermes_callback(job: BmoJob):
+    """Hermes job 完成後主動 POST 結果到 HERMES_CALLBACK_URL，帶 HMAC-SHA256 簽章。
+
+    best-effort：失敗（網路錯誤 / 非 2xx）只寫 log，不重試、不 fallback 發 LINE，
+    避免無聲的雙重通知。Hermes 端另以輪詢 GET /jobs 兜底。
+    """
+    if not HERMES_CALLBACK_URL:
+        logger.warning(f"hermes job #{job.id} done but HERMES_CALLBACK_URL unset")
+        return
+    payload = {
+        "job_id": job.id,
+        "status": job.status,
+        "branch": job.branch,
+        "diff": job.diff,
+        "result": job.result,
+        "error": job.error,
+        "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+    }
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    sig = hmac.new(CALLBACK_SECRET.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    try:
+        r = requests.post(
+            HERMES_CALLBACK_URL, data=body,
+            headers={"Content-Type": "application/json", "X-BMO-Signature": sig},
+            timeout=10,
+        )
+        if not (200 <= r.status_code < 300):
+            logger.warning(f"hermes callback non-2xx for #{job.id}: {r.status_code} {r.text[:120]}")
+    except Exception as e:
+        logger.warning(f"hermes callback error for #{job.id}: {e}")
 
 
 # --- Schemas ---
@@ -146,9 +214,24 @@ class JobCreate(BaseModel):
     prompt: str
     task_id: Optional[int] = None
     workspace: Optional[str] = None
+    source: Optional[str] = None   # "hermes"=Hermes 派的，NULL/其他=人類派的
     id_token: Optional[str] = None
     web_token: Optional[str] = None
     access_token: Optional[str] = None
+
+class SuggestionCreate(BaseModel):
+    suggestion: str
+    rationale: Optional[str] = None
+
+class SuggestionOut(BaseModel):
+    id: int
+    job_id: int
+    suggestion: str
+    rationale: Optional[str] = None
+    status: str
+    created_at: Optional[datetime] = None
+    reviewed_at: Optional[datetime] = None
+    model_config = {"from_attributes": True}
 
 class JobComment(BaseModel):
     comment: str
@@ -183,6 +266,7 @@ class JobOut(BaseModel):
     diff: Optional[str] = None
     status: str
     archived: bool = False
+    source: Optional[str] = None
     result: Optional[str] = None
     error: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -287,12 +371,16 @@ def bmo_stats(
 
 
 @router.post("/jobs", response_model=JobOut, status_code=201)
-def create_job(data: JobCreate, db: Session = Depends(get_db)):
+def create_job(data: JobCreate, request: Request, db: Session = Depends(get_db),
+               x_hermes_token: Optional[str] = Header(None)):
     if not data.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt is empty")
-    _check_user(data.id_token, data.web_token, data.access_token)
+    _check_user(data.id_token, data.web_token, data.access_token,
+                hermes_token=x_hermes_token, request=request)
     ws = data.workspace if data.workspace in WORKSPACES else DEFAULT_WORKSPACE
-    job = BmoJob(prompt=data.prompt.strip(), task_id=data.task_id, status="queued", workspace=ws)
+    source = data.source.strip() if data.source and data.source.strip() else None
+    job = BmoJob(prompt=data.prompt.strip(), task_id=data.task_id, status="queued",
+                 workspace=ws, source=source)
     db.add(job)
     # 派工即把來源任務標記為進行中，使用者不必再手動切狀態
     if data.task_id:
@@ -307,11 +395,21 @@ def create_job(data: JobCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/jobs/{job_id}/comment", response_model=JobOut, status_code=201)
-def comment_job(job_id: int, data: JobComment, db: Session = Depends(get_db)):
-    """對某個已完成 job 的變更下 review comment，建立沿用同分支的後續 job。"""
+def comment_job(job_id: int, data: JobComment, request: Request,
+                db: Session = Depends(get_db),
+                x_hermes_token: Optional[str] = Header(None)):
+    """對某個已完成 job 的變更下 review comment，建立沿用同分支的後續 job。
+
+    ⚠️ 鎖真人：comment 會直接觸發 worker 在同分支再改，Hermes 不可自主呼叫，
+    請改用 POST /jobs/{id}/suggest 提交待採用建議。
+    """
     if not data.comment.strip():
         raise HTTPException(status_code=400, detail="comment is empty")
-    _check_user(data.id_token, data.web_token, data.access_token)
+    _check_user(data.id_token, data.web_token, data.access_token,
+                hermes_token=x_hermes_token, request=request)
+    if _scope(request) != "human":
+        raise HTTPException(status_code=403,
+                            detail="comment 鎖真人；Hermes 請改用 POST /jobs/{id}/suggest")
     parent = db.query(BmoJob).filter(BmoJob.id == job_id).first()
     if not parent:
         raise HTTPException(status_code=404, detail="job not found")
@@ -345,12 +443,22 @@ def comment_job(job_id: int, data: JobComment, db: Session = Depends(get_db)):
 
 
 @router.post("/jobs/{job_id}/deploy", response_model=JobOut, status_code=201)
-def deploy_job(job_id: int, data: JobDeploy, db: Session = Depends(get_db)):
-    """一鍵合併+部署：建立一個 kind=deploy 的 job，worker 會把該分支合併進 main 並部署。"""
-    _check_user(data.id_token, data.web_token, data.access_token)
+def deploy_job(job_id: int, data: JobDeploy, request: Request,
+               db: Session = Depends(get_db),
+               x_hermes_token: Optional[str] = Header(None)):
+    """一鍵合併+部署：建立一個 kind=deploy 的 job，worker 會把該分支合併進 main 並部署。
+
+    ⚠️ 鎖真人（雙重保險）：auth_scope 必須是 human，且來源 job 不可為 hermes。
+    """
+    _check_user(data.id_token, data.web_token, data.access_token,
+                hermes_token=x_hermes_token, request=request)
+    _require_human(request)
     src = db.query(BmoJob).filter(BmoJob.id == job_id).first()
     if not src:
         raise HTTPException(status_code=404, detail="job not found")
+    # 內容層保險：即使 token scope 被誤設，Hermes 來源的 job 仍不可部署
+    if src.source == "hermes":
+        raise HTTPException(status_code=403, detail="deploy requires human authentication")
     if not src.branch:
         raise HTTPException(status_code=400, detail="此任務沒有可部署的分支")
     job = BmoJob(prompt=f"合併並部署分支 {src.branch}", kind="deploy",
@@ -360,6 +468,117 @@ def deploy_job(job_id: int, data: JobDeploy, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(job)
     return job
+
+
+# --- Hermes 建議（suggest）---
+@router.post("/jobs/{job_id}/suggest", response_model=SuggestionOut, status_code=201)
+def suggest_job(job_id: int, data: SuggestionCreate, request: Request,
+                db: Session = Depends(get_db),
+                x_hermes_token: Optional[str] = Header(None)):
+    """Hermes 對某個 job 提交「待採用建議」。只存進 bmo_job_suggestions，不觸發 worker。
+
+    僅限 auth_scope=="hermes"（這是給 Hermes 的端點；真人請直接用 comment）。
+    """
+    if not data.suggestion.strip():
+        raise HTTPException(status_code=400, detail="suggestion is empty")
+    _check_user(None, None, None, hermes_token=x_hermes_token, request=request)
+    if _scope(request) != "hermes":
+        raise HTTPException(status_code=403, detail="suggest 僅供 Hermes（需 X-Hermes-Token）")
+    job = db.query(BmoJob).filter(BmoJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    s = BmoJobSuggestion(job_id=job_id, suggestion=data.suggestion.strip(),
+                         rationale=(data.rationale.strip() if data.rationale else None),
+                         status="pending")
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    return s
+
+
+@router.get("/jobs/{job_id}/suggestions", response_model=List[SuggestionOut])
+def list_suggestions(job_id: int, request: Request, db: Session = Depends(get_db),
+                     x_hermes_token: Optional[str] = Header(None),
+                     id_token: Optional[str] = Header(None),
+                     web_token: Optional[str] = Header(None),
+                     access_token: Optional[str] = Header(None)):
+    """列出某 job 的所有建議，給 LIFF 顯示。僅限真人。"""
+    _check_user(id_token, web_token, access_token,
+                hermes_token=x_hermes_token, request=request)
+    _require_human(request)
+    return (db.query(BmoJobSuggestion)
+              .filter(BmoJobSuggestion.job_id == job_id)
+              .order_by(BmoJobSuggestion.id.desc()).all())
+
+
+@router.post("/jobs/{job_id}/suggestions/{sid}/adopt", response_model=JobOut, status_code=201)
+def adopt_suggestion(job_id: int, sid: int, request: Request, data: JobArchive | None = None,
+                     db: Session = Depends(get_db),
+                     x_hermes_token: Optional[str] = Header(None)):
+    """真人採用建議：把建議內容轉成一筆 comment 派給 worker（沿用同分支），
+    並把 suggestion 標記 adopted。"""
+    body = data or JobArchive()
+    _check_user(body.id_token, body.web_token, body.access_token,
+                hermes_token=x_hermes_token, request=request)
+    _require_human(request)
+    s = db.query(BmoJobSuggestion).filter(BmoJobSuggestion.id == sid,
+                                          BmoJobSuggestion.job_id == job_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="suggestion not found")
+    if s.status != "pending":
+        raise HTTPException(status_code=409, detail=f"suggestion already {s.status}")
+    parent = db.query(BmoJob).filter(BmoJob.id == job_id).first()
+    if not parent:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    # 與 comment_job 相同：追到根任務帶齊上下文（claude -p 無記憶）
+    root = parent
+    seen = set()
+    while root.parent_id and root.parent_id not in seen:
+        seen.add(root.id)
+        p = db.query(BmoJob).filter(BmoJob.id == root.parent_id).first()
+        if not p:
+            break
+        root = p
+    original = (root.prompt or "").strip()[:1500]
+    prev_result = (parent.result or parent.error or "(上一輪無輸出)").strip()[:2500]
+    suggestion_text = s.suggestion + (f"\n\n（理由）{s.rationale}" if s.rationale else "")
+    prompt = (
+        f"【原始任務 #{root.id}】\n{original}\n\n"
+        f"【你上一輪（#{parent.id}）的回覆】\n{prev_result}\n\n"
+        f"【你上一輪的程式碼變更 diff】\n```\n{(parent.diff or '(無，未改檔)')[:5000]}\n```\n\n"
+        f"【採用的 Hermes 建議】\n{suggestion_text}\n\n"
+        f"請依「原始任務 + 採用的建議」在同一分支 `{parent.branch}` 上實際動工，完成後簡短回報。"
+    )
+    job = BmoJob(prompt=prompt, task_id=parent.task_id, parent_id=parent.id,
+                 branch=parent.branch, status="queued", workspace=parent.workspace,
+                 source=root.source)
+    db.add(job)
+    s.status = "adopted"
+    s.reviewed_at = _now()
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+@router.post("/jobs/{job_id}/suggestions/{sid}/reject", response_model=SuggestionOut)
+def reject_suggestion(job_id: int, sid: int, request: Request, data: JobArchive | None = None,
+                      db: Session = Depends(get_db),
+                      x_hermes_token: Optional[str] = Header(None)):
+    """真人退回建議：suggestion 標記 rejected，不派工。"""
+    body = data or JobArchive()
+    _check_user(body.id_token, body.web_token, body.access_token,
+                hermes_token=x_hermes_token, request=request)
+    _require_human(request)
+    s = db.query(BmoJobSuggestion).filter(BmoJobSuggestion.id == sid,
+                                          BmoJobSuggestion.job_id == job_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="suggestion not found")
+    s.status = "rejected"
+    s.reviewed_at = _now()
+    db.commit()
+    db.refresh(s)
+    return s
 
 
 @router.get("/jobs", response_model=List[JobOut])
@@ -489,6 +708,12 @@ def complete_job(job_id: int, data: JobComplete,
         job.archived = True
     db.commit()
     db.refresh(job)
+
+    # Hermes 來源：不發 LINE，改主動 callback 給 Hermes（best-effort + HMAC 簽章）。
+    # BMO 對使用者維持零 LINE outbound，避免同一 job 收到 BMO 與 Hermes 兩則通知。
+    if job.source == "hermes":
+        _send_hermes_callback(job)
+        return job
 
     # LINE 通知（精簡：標題用真正的 comment，內容取結論開頭，純文字）
     head = _clean_title(job.prompt)
