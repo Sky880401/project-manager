@@ -451,7 +451,8 @@ def deploy_job(job_id: int, data: JobDeploy, request: Request,
                x_hermes_token: Optional[str] = Header(None)):
     """一鍵合併+部署：建立一個 kind=deploy 的 job，worker 會把該分支合併進 main 並部署。
 
-    ⚠️ 鎖真人（雙重保險）：auth_scope 必須是 human，且來源 job 不可為 hermes。
+    ⚠️ 鎖真人：auth_scope 必須是 human。Hermes（hermes scope）無法自行 deploy，
+    但真人 review 後可放行 Hermes 派工產生的分支上線。
     """
     _check_user(data.id_token, data.web_token, data.access_token,
                 hermes_token=x_hermes_token, request=request)
@@ -459,9 +460,8 @@ def deploy_job(job_id: int, data: JobDeploy, request: Request,
     src = db.query(BmoJob).filter(BmoJob.id == job_id).first()
     if not src:
         raise HTTPException(status_code=404, detail="job not found")
-    # 內容層保險：即使 token scope 被誤設，Hermes 來源的 job 仍不可部署
-    if src.source == "hermes":
-        raise HTTPException(status_code=403, detail="deploy requires human authentication")
+    # 安全模型：deploy 必須真人 scope（上面 _require_human 已擋）。
+    # Hermes 自己沒有 human scope 故無法 deploy；但真人 review 後可放行 Hermes 派工的成果上線。
     if not src.branch:
         raise HTTPException(status_code=400, detail="此任務沒有可部署的分支")
     job = BmoJob(prompt=f"合併並部署分支 {src.branch}", kind="deploy",
