@@ -99,6 +99,7 @@ class BmoJob(Base):
     notified = Column(Boolean, default=False)
     archived = Column(Boolean, default=False)        # 使用者標注完成後隱藏
     source = Column(Text, nullable=True)             # 派工來源；"hermes"=Hermes agent，NULL/其他=人類
+    agent = Column(String(30), nullable=True, index=True)  # 專業角色 coding/test/pm/finance，NULL=預設 coding
 
 
 class BmoJobSuggestion(Base):

@@ -215,6 +215,7 @@ class JobCreate(BaseModel):
     task_id: Optional[int] = None
     workspace: Optional[str] = None
     source: Optional[str] = None   # "hermes"=Hermes 派的，NULL/其他=人類派的
+    agent: Optional[str] = None    # 專業角色 coding/test/pm/finance，NULL=預設 coding
     id_token: Optional[str] = None
     web_token: Optional[str] = None
     access_token: Optional[str] = None
@@ -267,6 +268,7 @@ class JobOut(BaseModel):
     status: str
     archived: bool = False
     source: Optional[str] = None
+    agent: Optional[str] = None
     result: Optional[str] = None
     error: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -379,8 +381,9 @@ def create_job(data: JobCreate, request: Request, db: Session = Depends(get_db),
                 hermes_token=x_hermes_token, request=request)
     ws = data.workspace if data.workspace in WORKSPACES else DEFAULT_WORKSPACE
     source = data.source.strip() if data.source and data.source.strip() else None
+    agent = data.agent.strip() if data.agent and data.agent.strip() else None
     job = BmoJob(prompt=data.prompt.strip(), task_id=data.task_id, status="queued",
-                 workspace=ws, source=source)
+                 workspace=ws, source=source, agent=agent)
     db.add(job)
     # 派工即把來源任務標記為進行中，使用者不必再手動切狀態
     if data.task_id:

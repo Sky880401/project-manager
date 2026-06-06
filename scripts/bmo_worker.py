@@ -35,6 +35,9 @@ POLL = int(os.getenv("BMO_POLL_SECONDS", "10"))
 TIMEOUT = int(os.getenv("BMO_TIMEOUT", "1200"))
 CLAUDE_BIN = os.getenv("BMO_CLAUDE_BIN", "claude")
 CLAUDE_ARGS = shlex.split(os.getenv("BMO_CLAUDE_ARGS", ""))
+# 多代理：依 job.agent 載入對應角色的 system prompt（<AGENT_DIR>/<agent>.md），
+# 用 --append-system-prompt 疊加。找不到檔就當預設 coding（不疊加），完全向後相容。
+AGENT_DIR = os.path.expanduser(os.getenv("BMO_AGENT_DIR", "/root/project-manager/agents"))
 # 部署參數（不同 workspace 各異）：合併/推送的分支、部署目標 ssh host、遠端部署指令
 BASE_BRANCH = os.getenv("BMO_BASE_BRANCH", "main")
 DEPLOY_SSH = os.getenv("BMO_DEPLOY_SSH", "lxc")
@@ -103,11 +106,29 @@ OUTPUT_GUIDE = (
 )
 
 
-def run_claude(prompt: str) -> tuple[str | None, str | None, bool]:
+def agent_system_prompt(agent: str | None) -> str | None:
+    """讀 <AGENT_DIR>/<agent>.md 當該角色的 system prompt；找不到回 None（預設 coding 行為）。"""
+    if not agent:
+        return None
+    safe = "".join(c for c in agent if c.isalnum() or c in "-_")  # 防路徑穿越
+    path = os.path.join(AGENT_DIR, f"{safe}.md")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def run_claude(prompt: str, agent: str | None = None) -> tuple[str | None, str | None, bool]:
     """回傳 (result, error, timed_out)。timed_out=True 代表是逾時被砍，
     但 claude 在逾時前可能已對檔案做出變更，呼叫端需檢查 git 狀態。"""
     Path(WORKSPACE).mkdir(parents=True, exist_ok=True)
-    cmd = [CLAUDE_BIN, *CLAUDE_ARGS, "-p", prompt + OUTPUT_GUIDE]
+    sys_args = []
+    sp = agent_system_prompt(agent)
+    if sp:
+        sys_args = ["--append-system-prompt", sp]
+        log(f"  使用 agent 角色：{agent}")
+    cmd = [CLAUDE_BIN, *CLAUDE_ARGS, *sys_args, "-p", prompt + OUTPUT_GUIDE]
     try:
         proc = subprocess.run(cmd, cwd=WORKSPACE, capture_output=True, text=True, timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
@@ -121,19 +142,20 @@ def run_claude(prompt: str) -> tuple[str | None, str | None, bool]:
     return (out or "(無輸出)"), None, False
 
 
-def run_job_on_branch(prompt: str, job_id: int, existing_branch: str | None):
+def run_job_on_branch(prompt: str, job_id: int, existing_branch: str | None,
+                       agent: str | None = None):
     """回傳 (result, error, branch, diff)。
 
     existing_branch 有值＝review 後續任務，沿用同分支；否則開新分支。
     """
     if not is_git_repo():
-        result, error, _ = run_claude(prompt)
+        result, error, _ = run_claude(prompt, agent)
         return result, error, None, None
 
     try:
         orig = git("rev-parse", "--abbrev-ref", "HEAD")
     except Exception as e:
-        result, error, _ = run_claude(prompt)
+        result, error, _ = run_claude(prompt, agent)
         return result, error, None, f"取得分支失敗：{e}"
 
     # 新任務開分支；後續任務沿用既有分支
@@ -179,7 +201,7 @@ def run_job_on_branch(prompt: str, job_id: int, existing_branch: str | None):
             return None, f"建立分支失敗：{e}", None, None
         base = start_point  # diff 相對於開分支的最新主線
 
-    result, error, timed_out = run_claude(prompt)
+    result, error, timed_out = run_claude(prompt, agent)
 
     diff = None
     info = resumed_note
@@ -334,7 +356,8 @@ def process(job):
     if job.get("kind") == "deploy":
         result, error, branch, diff = deploy_branch(job.get("branch"))
     else:
-        result, error, branch, diff = run_job_on_branch(job["prompt"], jid, job.get("branch"))
+        result, error, branch, diff = run_job_on_branch(job["prompt"], jid, job.get("branch"),
+                                                         job.get("agent"))
     requests.post(f"{API_BASE}/api/bmo/jobs/{jid}/complete", headers=HEADERS,
                   json={"result": result, "error": error, "branch": branch, "diff": diff}, timeout=30)
     log(f"✓ 完成 #{jid}" + (f"（錯誤：{error[:60]}）" if error else f"（分支 {branch}）"))
